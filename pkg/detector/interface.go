@@ -8,4 +8,8 @@ import (
 type Detector interface {
 	// DetectPR returns the PR number if found, or 0 if not found
 	DetectPR(xr *unstructured.Unstructured) int
+
+	// GetBaseName strips the PR prefix to get the production resource name
+	// Returns original name if not a PR resource
+	GetBaseName(xr *unstructured.Unstructured) string
 }

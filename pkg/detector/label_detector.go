@@ -48,3 +48,8 @@ func (d *LabelDetector) DetectPR(xr *unstructured.Unstructured) int {
 
 	return prNumber
 }
+
+// GetBaseName returns the original name (label detector doesn't use name patterns)
+func (d *LabelDetector) GetBaseName(xr *unstructured.Unstructured) string {
+	return xr.GetName()
+}

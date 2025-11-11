@@ -30,7 +30,7 @@ func NewNameDetector(pattern string) *NameDetector {
 func (d *NameDetector) DetectPR(xr *unstructured.Unstructured) int {
 	name := xr.GetName()
 	matches := d.pattern.FindStringSubmatch(name)
-	
+
 	if len(matches) < 2 {
 		return 0
 	}
@@ -41,4 +41,26 @@ func (d *NameDetector) DetectPR(xr *unstructured.Unstructured) int {
 	}
 
 	return prNumber
+}
+
+// GetBaseName strips the PR prefix from an XR name to get the production resource name
+// Example: "pr-2-mill" -> "mill"
+func (d *NameDetector) GetBaseName(xr *unstructured.Unstructured) string {
+	name := xr.GetName()
+	matches := d.pattern.FindStringSubmatch(name)
+
+	if len(matches) < 2 {
+		// Not a PR XR, return original name
+		return name
+	}
+
+	// Pattern format: "pr-{number}-*" becomes "^pr-(\d+)-(.*)$"
+	// matches[0] = full match (pr-2-mill)
+	// matches[1] = PR number (2)
+	// matches[2] = base name (mill)
+	if len(matches) >= 3 {
+		return matches[2]
+	}
+
+	return name
 }

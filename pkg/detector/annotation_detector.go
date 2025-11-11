@@ -48,3 +48,8 @@ func (d *AnnotationDetector) DetectPR(xr *unstructured.Unstructured) int {
 
 	return prNumber
 }
+
+// GetBaseName returns the original name (annotation detector doesn't use name patterns)
+func (d *AnnotationDetector) GetBaseName(xr *unstructured.Unstructured) string {
+	return xr.GetName()
+}

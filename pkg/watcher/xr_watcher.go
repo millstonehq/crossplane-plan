@@ -228,8 +228,20 @@ func (w *XRWatcher) handleXREvent(ctx context.Context, eventType watch.EventType
 		"prNumber", prNumber,
 	)
 
-	// Calculate diff
-	diff, err := w.differ.CalculateDiff(ctx, xr)
+	// Clone the XR and rename it to the production name
+	// This allows crossplane-diff to compare against production resources
+	baseName := w.detector.GetBaseName(xr)
+	xrForDiff := xr.DeepCopy()
+	xrForDiff.SetName(baseName)
+
+	w.logger.Info("Comparing PR XR against production",
+		"prName", name,
+		"productionName", baseName,
+	)
+
+	// Calculate diff using renamed XR
+	// crossplane-diff will look for managed resources labeled with the production name
+	diff, err := w.differ.CalculateDiff(ctx, xrForDiff)
 	if err != nil {
 		w.logger.Error(err, "failed to calculate diff", "name", name)
 		return
