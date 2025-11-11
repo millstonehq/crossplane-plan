@@ -92,8 +92,9 @@ func (c *Calculator) Initialize(ctx context.Context) error {
 		c.xpClients,
 		diffprocessor.WithLogger(c.logger),
 		diffprocessor.WithNamespace("default"),
-		diffprocessor.WithColorize(false), // No colors for structured output
+		diffprocessor.WithColorize(false),   // No colors for structured output
 		diffprocessor.WithCompact(false),
+		diffprocessor.WithMaxNestedDepth(10), // Default depth limit for nested XRs
 	)
 
 	// Initialize processor
