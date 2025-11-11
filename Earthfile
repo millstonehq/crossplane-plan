@@ -18,16 +18,18 @@ deps:
 # build compiles the crossplane-plan binary
 build:
     FROM +deps
-    
+
     COPY --dir cmd pkg ./
     COPY go.mod go.sum ./
-    
-    # Build for linux/amd64 with CGO disabled for static binary
-    RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+
+    # Build for target architecture with CGO disabled for static binary
+    # TARGETARCH is built-in and set automatically by Earthly based on --platform
+    ARG TARGETARCH
+    RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
         -ldflags="-w -s" \
         -o /app/bin/crossplane-plan \
         ./cmd/crossplane-plan
-    
+
     SAVE ARTIFACT /app/bin/crossplane-plan AS LOCAL bin/crossplane-plan
 
 # test runs unit tests with coverage gate
@@ -56,28 +58,32 @@ lint:
 
 # image builds the container image
 image:
-    FROM go+base-go-runtime
-    
+    # Multi-platform build - TARGETPLATFORM/TARGETARCH are built-in and set by Earthly
+    ARG TARGETPLATFORM
+    ARG TARGETARCH
+    FROM --platform=$TARGETPLATFORM go+base-go-runtime
+
     USER nonroot
     WORKDIR /app
-    
+
     # Copy binary from build stage
     COPY +build/crossplane-plan /app/crossplane-plan
-    
-    ENTRYPOINT ["/app/crossplane-plan"]
-    
-    # Save with tag
-    ARG tag=latest
-    SAVE IMAGE crossplane-plan:${tag}
 
-# publish pushes the image to ghcr.io
-publish:
-    FROM +image
-    
+    ENTRYPOINT ["/app/crossplane-plan"]
+
+    # Save image (--push only activates when running earthly --push +publish)
     ARG tag=latest
-    
-    # Push to ghcr (authenticate with: docker login ghcr.io)
     SAVE IMAGE --push ghcr.io/millstonehq/crossplane-plan:${tag}
+
+# publish pushes multi-arch images to ghcr.io
+publish:
+    FROM alpine:latest
+    ARG tag=latest
+
+    # Build and push both amd64 and arm64 images
+    # Run with: earthly --push +publish
+    # Authenticate first: docker login ghcr.io
+    BUILD --platform=linux/amd64 --platform=linux/arm64 +image --tag=$tag
 
 # all runs all checks and builds
 all:

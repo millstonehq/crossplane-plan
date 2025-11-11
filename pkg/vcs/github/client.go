@@ -2,7 +2,6 @@ package github
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -36,8 +35,8 @@ type ClientConfig struct {
 	InstallationID string // Installation ID for the app
 	PrivateKey     []byte // Private key for the GitHub App
 
-	// Crossplane provider credentials format (JSON)
-	// This is base64-encoded JSON in the format used by crossplane-provider-github
+	// Crossplane provider credentials format (plain JSON from Kubernetes secret)
+	// Kubernetes automatically decodes base64 when mounting secrets as env vars
 	Credentials string
 
 	// Repository (required)
@@ -65,7 +64,7 @@ func NewClient(token, repository string) (*Client, error) {
 // NewClientFromConfig creates a new GitHub client from configuration
 // Supports multiple authentication methods:
 // 1. Token authentication (PAT or OAuth)
-// 2. Crossplane provider credentials format (base64-encoded JSON)
+// 2. Crossplane provider credentials format (plain JSON from Kubernetes secret)
 // 3. GitHub App authentication (direct credentials)
 func NewClientFromConfig(config *ClientConfig) (*Client, error) {
 	// Parse repository (format: owner/repo)
@@ -86,7 +85,7 @@ func NewClientFromConfig(config *ClientConfig) (*Client, error) {
 		)
 		httpClient = oauth2.NewClient(ctx, ts)
 	} else if config.Credentials != "" {
-		// Crossplane provider credentials format (base64-encoded JSON)
+		// Crossplane provider credentials format (plain JSON from Kubernetes)
 		client, err := createClientFromCrossplaneCredentials(config.Credentials)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse crossplane credentials: %w", err)
@@ -111,16 +110,12 @@ func NewClientFromConfig(config *ClientConfig) (*Client, error) {
 }
 
 // createClientFromCrossplaneCredentials parses crossplane provider credentials and creates HTTP client
-func createClientFromCrossplaneCredentials(credentialsB64 string) (*http.Client, error) {
-	// Decode base64
-	credentialsJSON, err := base64.StdEncoding.DecodeString(credentialsB64)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode base64 credentials: %w", err)
-	}
-
-	// Parse JSON
+// Note: Kubernetes automatically decodes base64 when mounting secrets as env vars,
+// so the input is already plain JSON (not base64-encoded)
+func createClientFromCrossplaneCredentials(credentialsJSON string) (*http.Client, error) {
+	// Parse JSON directly (already decoded by Kubernetes)
 	var creds crossplaneProviderCredentials
-	if err := json.Unmarshal(credentialsJSON, &creds); err != nil {
+	if err := json.Unmarshal([]byte(credentialsJSON), &creds); err != nil {
 		return nil, fmt.Errorf("failed to parse credentials JSON: %w", err)
 	}
 
