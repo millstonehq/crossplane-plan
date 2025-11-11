@@ -234,6 +234,13 @@ func (w *XRWatcher) handleXREvent(ctx context.Context, eventType watch.EventType
 	xrForDiff := xr.DeepCopy()
 	xrForDiff.SetName(baseName)
 
+	// Clear immutable metadata fields that would cause dry-run apply to fail
+	xrForDiff.SetUID("")
+	xrForDiff.SetResourceVersion("")
+	xrForDiff.SetGeneration(0)
+	xrForDiff.SetCreationTimestamp(metav1.Time{})
+	xrForDiff.SetManagedFields(nil)
+
 	w.logger.Info("Comparing PR XR against production",
 		"prName", name,
 		"productionName", baseName,

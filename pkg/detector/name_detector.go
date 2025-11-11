@@ -16,9 +16,9 @@ type NameDetector struct {
 // Pattern format: "pr-{number}-*" where {number} is replaced with (\d+)
 func NewNameDetector(pattern string) *NameDetector {
 	// Convert pattern to regex
-	// "pr-{number}-*" becomes "^pr-(\d+)-.*$"
+	// "pr-{number}-*" becomes "^pr-(\d+)-(.*)$"
 	regexPattern := regexp.MustCompile(`\{number\}`).ReplaceAllString(pattern, `(\d+)`)
-	regexPattern = regexp.MustCompile(`\*`).ReplaceAllString(regexPattern, `.*`)
+	regexPattern = regexp.MustCompile(`\*`).ReplaceAllString(regexPattern, `(.*)`)
 	regexPattern = "^" + regexPattern + "$"
 
 	return &NameDetector{
