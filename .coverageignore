@@ -1,0 +1,8 @@
+# Infrastructure components that require integration testing
+# These are excluded from unit test coverage requirements
+
+# Differ - requires real Crossplane clients and API server
+pkg/differ/
+
+# Watcher - requires Kubernetes API server and dynamic client
+pkg/watcher/

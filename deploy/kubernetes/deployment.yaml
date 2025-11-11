@@ -1,0 +1,76 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crossplane-plan
+  namespace: crossplane-system
+  labels:
+    app: crossplane-plan
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: crossplane-plan
+  template:
+    metadata:
+      labels:
+        app: crossplane-plan
+    spec:
+      serviceAccountName: crossplane-plan
+      containers:
+        - name: crossplane-plan
+          image: ghcr.io/millstonehq/crossplane-plan:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            - --detection-strategy=$(DETECTION_STRATEGY)
+            - --name-pattern=$(NAME_PATTERN)
+            - --github-repo=$(GITHUB_REPO)
+          env:
+            # Detection configuration
+            - name: DETECTION_STRATEGY
+              valueFrom:
+                configMapKeyRef:
+                  name: crossplane-plan-config
+                  key: detection-strategy
+
+            - name: NAME_PATTERN
+              valueFrom:
+                configMapKeyRef:
+                  name: crossplane-plan-config
+                  key: name-pattern
+
+            - name: GITHUB_REPO
+              valueFrom:
+                configMapKeyRef:
+                  name: crossplane-plan-config
+                  key: github-repo
+
+            # GitHub authentication (uses same secret as crossplane-provider-github)
+            - name: GITHUB_CREDENTIALS
+              valueFrom:
+                secretKeyRef:
+                  name: github-creds
+                  key: credentials
+          
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+
+      securityContext:
+        fsGroup: 65532
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault

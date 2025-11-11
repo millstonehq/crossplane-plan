@@ -1,0 +1,21 @@
+# Binaries
+/bin/
+crossplane-plan
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Coverage reports
+*.out
+coverage.out
+coverage-filtered.out
+coverage.html
+
+# Temporary files
+*.tmp
+*.swp
+*~

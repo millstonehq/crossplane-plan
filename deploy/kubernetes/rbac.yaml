@@ -1,0 +1,82 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: crossplane-plan
+  namespace: crossplane-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: crossplane-plan
+rules:
+  # Read Crossplane XRDs to discover composite resources
+  - apiGroups:
+      - apiextensions.crossplane.io
+    resources:
+      - compositeresourcedefinitions
+    verbs:
+      - get
+      - list
+      - watch
+  
+  # Read all composite resources (XRs) across all API groups
+  # This is dynamic based on XRDs in the cluster
+  - apiGroups:
+      - "*"
+    resources:
+      - "*"
+    verbs:
+      - get
+      - list
+      - watch
+  
+  # Read compositions for rendering
+  - apiGroups:
+      - apiextensions.crossplane.io
+    resources:
+      - compositions
+      - compositionrevisions
+    verbs:
+      - get
+      - list
+  
+  # Read provider configs and managed resources for diff calculation
+  - apiGroups:
+      - "*"
+    resources:
+      - "*"
+    verbs:
+      - get
+      - list
+  
+  # Read secrets for provider credentials (crossplane-diff needs this)
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - get
+      - list
+  
+  # Read environment configs
+  - apiGroups:
+      - apiextensions.crossplane.io
+    resources:
+      - environmentconfigs
+    verbs:
+      - get
+      - list
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: crossplane-plan
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: crossplane-plan
+subjects:
+  - kind: ServiceAccount
+    name: crossplane-plan
+    namespace: crossplane-system

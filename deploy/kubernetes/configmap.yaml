@@ -1,0 +1,37 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: crossplane-plan-config
+  namespace: crossplane-system
+data:
+  # PR detection strategy: name, label, or annotation
+  detection-strategy: "name"
+
+  # Name pattern for name-based detection
+  # Example: pr-{number}-* matches pr-123-mill
+  name-pattern: "pr-{number}-*"
+
+  # GitHub repository for posting comments (format: owner/repo)
+  github-repo: "millstonehq/mill"
+
+  # Label key for label-based detection (optional)
+  label-key: "millstone.tech/pr-number"
+
+  # Annotation key for annotation-based detection (optional)
+  annotation-key: "millstone.tech/preview-pr"
+
+  # Authentication:
+  # Authentication credentials are configured via the github-app-credentials Secret
+  # Two authentication methods are supported:
+  #
+  # 1. GitHub App (RECOMMENDED):
+  #    - Higher rate limits (5000 req/hour per installation)
+  #    - Better security (scoped permissions)
+  #    - Easier credential rotation
+  #    - Required secret keys: app-id, installation-id, private-key
+  #
+  # 2. Personal Access Token (PAT):
+  #    - Simple to set up
+  #    - Required secret key: token
+  #    - Required scope: repo (for posting PR comments)
