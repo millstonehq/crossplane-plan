@@ -20,6 +20,11 @@ func DefaultStripRules() []StripRule {
 			Pattern: `^argocd\.argoproj\.io/.*`,
 			Reason:  "ArgoCD-managed tracking metadata",
 		},
+		{
+			Path:    "metadata.labels",
+			Pattern: `^crossplane\.io/composite$`,
+			Reason:  "Crossplane composite resource tracking label",
+		},
 	}
 }
 
