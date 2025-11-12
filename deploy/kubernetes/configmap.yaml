@@ -35,3 +35,19 @@ data:
   #    - Simple to set up
   #    - Required secret key: token
   #    - Required scope: repo (for posting PR comments)
+
+  # Field stripping configuration
+  config.yaml: |
+    # Diff configuration
+    diff:
+      # Enable built-in default strip rules
+      stripDefaults: true
+
+      # Additional user-defined strip rules
+      # stripRules:
+      #   - path: spec.someField
+      #     equals: "someValue"
+      #     reason: "Custom field to strip"
+      #   - path: metadata.labels
+      #     pattern: "^custom\\.label\\.prefix/.*"
+      #     reason: "Custom label prefix"

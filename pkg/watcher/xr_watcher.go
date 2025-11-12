@@ -21,14 +21,15 @@ import (
 
 // XRWatcher watches Crossplane Composite Resources and posts diffs to GitHub
 type XRWatcher struct {
-	clientset      *kubernetes.Clientset
-	dynamicClient  dynamic.Interface
-	detector       detector.Detector
-	differ         *differ.Calculator
-	formatter      *formatter.GitHubFormatter
-	vcsClient      *github.Client
-	logger         logr.Logger
-	processedXRs   map[string]string // name -> resource version
+	clientset              *kubernetes.Clientset
+	dynamicClient          dynamic.Interface
+	detector               detector.Detector
+	differ                 *differ.Calculator
+	formatter              *formatter.GitHubFormatter
+	vcsClient              *github.Client
+	logger                 logr.Logger
+	processedXRs           map[string]string // name -> resource version
+	reconciliationInterval int               // minutes
 }
 
 // NewXRWatcher creates a new XRWatcher
@@ -39,6 +40,7 @@ func NewXRWatcher(
 	formatter *formatter.GitHubFormatter,
 	vcsClient *github.Client,
 	logger logr.Logger,
+	reconciliationInterval int,
 ) *XRWatcher {
 	// Create dynamic client from the same config
 	cfg, err := rest.InClusterConfig()
@@ -53,14 +55,15 @@ func NewXRWatcher(
 	}
 
 	return &XRWatcher{
-		clientset:      clientset,
-		dynamicClient:  dynamicClient,
-		detector:       detector,
-		differ:         differ,
-		formatter:      formatter,
-		vcsClient:      vcsClient,
-		logger:         logger,
-		processedXRs:   make(map[string]string),
+		clientset:              clientset,
+		dynamicClient:          dynamicClient,
+		detector:               detector,
+		differ:                 differ,
+		formatter:              formatter,
+		vcsClient:              vcsClient,
+		logger:                 logger,
+		processedXRs:           make(map[string]string),
+		reconciliationInterval: reconciliationInterval,
 	}
 }
 
@@ -76,9 +79,43 @@ func (w *XRWatcher) Start(ctx context.Context) error {
 
 	w.logger.Info("Discovered XRDs", "count", len(gvrs))
 
-	// Watch each GVR
+	// Initial reconciliation - process existing PR XRs
+	w.logger.Info("Starting initial reconciliation of existing PR XRs")
+	for _, gvr := range gvrs {
+		if err := w.reconcileExistingXRs(ctx, gvr); err != nil {
+			w.logger.Error(err, "failed initial reconciliation", "gvr", gvr.String())
+			// Don't fail startup, just log and continue
+		}
+	}
+	w.logger.Info("Initial reconciliation complete")
+
+	// Watch each GVR for changes
 	for _, gvr := range gvrs {
 		go w.watchGVR(ctx, gvr)
+	}
+
+	// Start periodic reconciliation if enabled
+	if w.reconciliationInterval > 0 {
+		ticker := time.NewTicker(time.Duration(w.reconciliationInterval) * time.Minute)
+		defer ticker.Stop()
+
+		w.logger.Info("Starting periodic reconciliation", "interval", fmt.Sprintf("%dm", w.reconciliationInterval))
+
+		go func() {
+			for {
+				select {
+				case <-ticker.C:
+					w.logger.Info("Running periodic reconciliation")
+					for _, gvr := range gvrs {
+						if err := w.reconcileExistingXRs(ctx, gvr); err != nil {
+							w.logger.Error(err, "periodic reconciliation failed", "gvr", gvr.String())
+						}
+					}
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
 	}
 
 	// Block until context is cancelled
@@ -148,6 +185,45 @@ func (w *XRWatcher) discoverXRDGVRs(ctx context.Context) ([]schema.GroupVersionR
 	return gvrs, nil
 }
 
+// reconcileExistingXRs performs initial reconciliation of existing XRs for a GVR
+func (w *XRWatcher) reconcileExistingXRs(ctx context.Context, gvr schema.GroupVersionResource) error {
+	list, err := w.dynamicClient.Resource(gvr).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to list resources: %w", err)
+	}
+
+	w.logger.Info("Checking for existing PR XRs", "gvr", gvr.String(), "totalCount", len(list.Items))
+
+	// Group XRs by PR number
+	prXRs := make(map[int][]*unstructured.Unstructured)
+	for _, item := range list.Items {
+		xr := item.DeepCopy()
+
+		// Only process PR XRs
+		prNumber := w.detector.DetectPR(xr)
+		if prNumber == 0 {
+			continue
+		}
+
+		prXRs[prNumber] = append(prXRs[prNumber], xr)
+	}
+
+	// Process each PR's XRs as a batch
+	for prNumber, xrs := range prXRs {
+		w.logger.Info("Reconciling PR XRs", "prNumber", prNumber, "count", len(xrs))
+		if err := w.handlePRBatch(ctx, prNumber, xrs); err != nil {
+			w.logger.Error(err, "failed to process PR batch", "prNumber", prNumber)
+			// Continue with other PRs
+		}
+	}
+
+	if len(prXRs) > 0 {
+		w.logger.Info("Reconciled existing PR XRs", "gvr", gvr.String(), "prCount", len(prXRs))
+	}
+
+	return nil
+}
+
 // watchGVR watches a specific GVR for changes
 func (w *XRWatcher) watchGVR(ctx context.Context, gvr schema.GroupVersionResource) {
 	w.logger.Info("Watching GVR", "gvr", gvr.String())
@@ -196,6 +272,93 @@ func (w *XRWatcher) watchGVROnce(ctx context.Context, gvr schema.GroupVersionRes
 			w.handleXREvent(ctx, event.Type, xr)
 		}
 	}
+}
+
+// handlePRBatch processes all XRs for a single PR and posts one combined comment
+func (w *XRWatcher) handlePRBatch(ctx context.Context, prNumber int, xrs []*unstructured.Unstructured) error {
+	results := make(map[string]*differ.DiffResult)
+
+	for _, xr := range xrs {
+		name := xr.GetName()
+		namespace := xr.GetNamespace()
+		resourceVersion := xr.GetResourceVersion()
+
+		// Check if we've already processed this version
+		key := fmt.Sprintf("%s/%s", namespace, name)
+		if namespace == "" {
+			key = name
+		}
+
+		if lastVersion, exists := w.processedXRs[key]; exists && lastVersion == resourceVersion {
+			continue // Already processed
+		}
+
+		w.logger.Info("Processing XR in batch",
+			"name", name,
+			"namespace", namespace,
+			"prNumber", prNumber,
+		)
+
+		// Clone the XR and rename it to the production name
+		baseName := w.detector.GetBaseName(xr)
+		xrForDiff := xr.DeepCopy()
+		xrForDiff.SetName(baseName)
+
+		// Clear immutable metadata fields
+		xrForDiff.SetUID("")
+		xrForDiff.SetResourceVersion("")
+		xrForDiff.SetGeneration(0)
+		xrForDiff.SetCreationTimestamp(metav1.Time{})
+		xrForDiff.SetManagedFields(nil)
+
+		w.logger.Info("Comparing PR XR against production",
+			"prName", name,
+			"productionName", baseName,
+		)
+
+		// Calculate diff
+		diff, err := w.differ.CalculateDiff(ctx, xrForDiff)
+		if err != nil {
+			w.logger.Error(err, "failed to calculate diff", "name", name)
+			continue
+		}
+
+		// Store result using original XR name as key
+		results[name] = diff
+
+		// Mark as processed
+		w.processedXRs[key] = resourceVersion
+	}
+
+	// If no results, nothing to post
+	if len(results) == 0 {
+		return nil
+	}
+
+	// Format combined comment
+	var comment string
+	if len(results) == 1 {
+		// Single XR - use simple format
+		for _, diff := range results {
+			comment = w.formatter.FormatDiff(xrs[0], diff)
+		}
+	} else {
+		// Multiple XRs - use combined format
+		comment = w.formatter.FormatMultipleDiffs(results)
+	}
+
+	// Post to GitHub
+	if w.vcsClient != nil {
+		if err := w.vcsClient.PostComment(ctx, prNumber, comment); err != nil {
+			return fmt.Errorf("failed to post GitHub comment: %w", err)
+		}
+		w.logger.Info("Posted GitHub comment", "prNumber", prNumber, "resourceCount", len(results))
+	} else {
+		// Dry-run mode
+		w.logger.Info("Dry-run: would post comment", "prNumber", prNumber, "resourceCount", len(results))
+	}
+
+	return nil
 }
 
 // handleXREvent processes an XR event
