@@ -348,17 +348,6 @@ func (w *XRWatcher) handlePRBatch(ctx context.Context, prNumber int, xrs []*unst
 	for _, xr := range xrs {
 		name := xr.GetName()
 		namespace := xr.GetNamespace()
-		resourceVersion := xr.GetResourceVersion()
-
-		// Check if we've already processed this version
-		key := fmt.Sprintf("%s/%s", namespace, name)
-		if namespace == "" {
-			key = name
-		}
-
-		if lastVersion, exists := w.processedXRs[key]; exists && lastVersion == resourceVersion {
-			continue // Already processed
-		}
 
 		w.logger.Info("Processing XR in batch",
 			"name", name,
@@ -391,10 +380,8 @@ func (w *XRWatcher) handlePRBatch(ctx context.Context, prNumber int, xrs []*unst
 		}
 
 		// Store result using original XR name as key
+		// Always include all resources (even with no changes) for complete batch view
 		results[name] = diff
-
-		// Mark as processed
-		w.processedXRs[key] = resourceVersion
 	}
 
 	// Detect deletions: find production resources that don't have PR equivalents
