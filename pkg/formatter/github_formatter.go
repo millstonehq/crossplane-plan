@@ -7,6 +7,7 @@ import (
 
 	"github.com/millstonehq/crossplane-plan/pkg/differ"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/yaml"
 )
 
 // GitHubFormatter formats diffs for GitHub PR comments
@@ -186,26 +187,69 @@ func (f *GitHubFormatter) FormatMultipleDiffs(results map[string]*differ.DiffRes
 		return b.String()
 	}
 
-	// List resources with changes
-	b.WriteString("### 📋 Resources with Changes\n\n")
+	// Separate modifications and deletions for better presentation
+	modifications := make(map[string]*differ.DiffResult)
+	deletions := make(map[string]*differ.DiffResult)
+
 	for name, result := range results {
 		if result.HasChanges {
-			b.WriteString(fmt.Sprintf("- **%s**: %s\n", name, result.Summary))
+			if strings.HasPrefix(name, "DELETED-") {
+				// Strip the prefix for display
+				actualName := strings.TrimPrefix(name, "DELETED-")
+				deletions[actualName] = result
+			} else {
+				modifications[name] = result
+			}
 		}
 	}
-	b.WriteString("\n")
 
-	// Individual diffs
-	for name, result := range results {
-		if !result.HasChanges {
-			continue
+	// List modified resources
+	if len(modifications) > 0 {
+		b.WriteString("### 📋 Modified Resources\n\n")
+		for name, result := range modifications {
+			b.WriteString(fmt.Sprintf("- **%s**: %s\n", name, result.Summary))
 		}
+		b.WriteString("\n")
+	}
 
+	// List deleted resources (with warning)
+	if len(deletions) > 0 {
+		b.WriteString("### 🗑️ Deleted Resources\n\n")
+		for name, result := range deletions {
+			b.WriteString(fmt.Sprintf("- **%s**: %s\n", name, result.Summary))
+		}
+		b.WriteString("\n")
+	}
+
+	// Individual diffs for modifications
+	for name, result := range modifications {
 		b.WriteString(fmt.Sprintf("### `%s`\n\n", name))
 		b.WriteString("<details>\n")
 		b.WriteString("<summary>📝 View Diff</summary>\n\n")
 		b.WriteString("```diff\n")
 		b.WriteString(result.RawDiff)
+		b.WriteString("\n```\n")
+		b.WriteString("</details>\n\n")
+	}
+
+	// Individual diffs for deletions
+	for name, result := range deletions {
+		b.WriteString(fmt.Sprintf("### `%s` (DELETION)\n\n", name))
+		b.WriteString("> **⚠️ WARNING:** This resource will be **DELETED** when the PR is merged.\n\n")
+		b.WriteString("<details>\n")
+		b.WriteString("<summary>📄 View Resource Details</summary>\n\n")
+		b.WriteString("```yaml\n")
+		// Format the XR as YAML for display
+		if result.XR != nil {
+			yamlBytes, err := yaml.Marshal(result.XR.Object)
+			if err == nil {
+				b.WriteString(string(yamlBytes))
+			} else {
+				b.WriteString(result.RawDiff)
+			}
+		} else {
+			b.WriteString(result.RawDiff)
+		}
 		b.WriteString("\n```\n")
 		b.WriteString("</details>\n\n")
 	}

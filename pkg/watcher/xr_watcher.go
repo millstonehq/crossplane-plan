@@ -397,6 +397,12 @@ func (w *XRWatcher) handlePRBatch(ctx context.Context, prNumber int, xrs []*unst
 		w.processedXRs[key] = resourceVersion
 	}
 
+	// Detect deletions: find production resources that don't have PR equivalents
+	if err := w.detectDeletions(ctx, prNumber, xrs, results); err != nil {
+		w.logger.Error(err, "failed to detect deletions", "prNumber", prNumber)
+		// Continue anyway - deletions are not critical for the diff
+	}
+
 	// If no results, nothing to post
 	if len(results) == 0 {
 		return nil
@@ -474,6 +480,81 @@ func (w *XRWatcher) findAllPRResources(ctx context.Context, prNumber int) ([]*un
 	}
 
 	return allXRs, nil
+}
+
+// detectDeletions finds production resources that will be deleted (no PR equivalent exists)
+func (w *XRWatcher) detectDeletions(ctx context.Context, prNumber int, prResources []*unstructured.Unstructured, results map[string]*differ.DiffResult) error {
+	// Build a map of PR resource base names for quick lookup
+	prBaseNames := make(map[string]bool)
+	prGVKs := make(map[schema.GroupVersionKind]bool)
+
+	for _, prXR := range prResources {
+		baseName := w.detector.GetBaseName(prXR)
+		prBaseNames[baseName] = true
+		prGVKs[prXR.GroupVersionKind()] = true
+	}
+
+	// If no PR resources, nothing to compare against
+	if len(prBaseNames) == 0 {
+		return nil
+	}
+
+	// Get all GVRs we're watching
+	gvrs, err := w.discoverXRDGVRs(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to discover XRDs: %w", err)
+	}
+
+	// Find all production resources (non-PR resources)
+	for _, gvr := range gvrs {
+		list, err := w.dynamicClient.Resource(gvr).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			w.logger.Error(err, "failed to list production resources", "gvr", gvr.String())
+			continue
+		}
+
+		for _, item := range list.Items {
+			prodXR := item.DeepCopy()
+
+			// Skip if this is a PR resource
+			if w.detector.DetectPR(prodXR) != 0 {
+				continue
+			}
+
+			// Skip if this GVK is not in the PR (PR doesn't touch this resource type)
+			if !prGVKs[prodXR.GroupVersionKind()] {
+				continue
+			}
+
+			prodName := prodXR.GetName()
+
+			// Check if there's a corresponding PR resource
+			if !prBaseNames[prodName] {
+				// This production resource will be deleted!
+				w.logger.Info("Detected deletion",
+					"resource", prodName,
+					"gvk", prodXR.GroupVersionKind().String(),
+					"prNumber", prNumber,
+				)
+
+				// Create a deletion diff result
+				deletionDiff := &differ.DiffResult{
+					XR:         prodXR,
+					HasChanges: true,
+					Summary:    fmt.Sprintf("⚠️  Resource will be **DELETED**"),
+					RawDiff:    fmt.Sprintf("Resource %s/%s will be deleted", prodXR.GetKind(), prodName),
+					ManagedResources: []differ.ManagedResourceState{},
+					StrippedFields:   []differ.StrippedField{},
+				}
+
+				// Use a special key format for deletions to distinguish from modifications
+				deletionKey := fmt.Sprintf("DELETED-%s", prodName)
+				results[deletionKey] = deletionDiff
+			}
+		}
+	}
+
+	return nil
 }
 
 // handleXREvent processes an XR event by enqueueing it for batch processing
