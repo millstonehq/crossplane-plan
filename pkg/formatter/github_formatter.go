@@ -2,6 +2,7 @@ package formatter
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/millstonehq/crossplane-plan/pkg/differ"
@@ -107,16 +108,39 @@ func (f *GitHubFormatter) formatInfrastructureDrift(b *strings.Builder, managedR
 			continue
 		}
 
-		// Show field-by-field comparison
-		b.WriteString("| Field | Your Declaration | Actual Infrastructure |\n")
-		b.WriteString("|-------|------------------|----------------------|\n")
+		// Separate scalar and array/complex fields
+		scalarFields := make(map[string]differ.FieldComparison)
+		complexFields := make(map[string]differ.FieldComparison)
 
 		for field, comparison := range mr.DeclaredVsActual {
-			declaredStr := fmt.Sprintf("`%v`", comparison.Declared)
-			actualStr := fmt.Sprintf("`%v`", comparison.Actual)
-			b.WriteString(fmt.Sprintf("| `%s` | %s | %s |\n", field, declaredStr, actualStr))
+			if isArrayOrSlice(comparison.Declared) || isArrayOrSlice(comparison.Actual) {
+				complexFields[field] = comparison
+			} else {
+				scalarFields[field] = comparison
+			}
 		}
-		b.WriteString("\n")
+
+		// Show scalar fields in table
+		if len(scalarFields) > 0 {
+			b.WriteString("**Simple field differences:**\n\n")
+			b.WriteString("| Field | Your Declaration | Actual Infrastructure |\n")
+			b.WriteString("|-------|------------------|----------------------|\n")
+
+			for field, comparison := range scalarFields {
+				declaredStr := fmt.Sprintf("`%v`", comparison.Declared)
+				actualStr := fmt.Sprintf("`%v`", comparison.Actual)
+				b.WriteString(fmt.Sprintf("| `%s` | %s | %s |\n", field, declaredStr, actualStr))
+			}
+			b.WriteString("\n")
+		}
+
+		// Show array fields with set-based diff
+		if len(complexFields) > 0 {
+			b.WriteString("**Array/list field differences:**\n\n")
+			for field, comparison := range complexFields {
+				f.formatArrayDiff(b, field, comparison)
+			}
+		}
 
 		// Show what will happen
 		if mr.IsReadOnly {
@@ -230,4 +254,114 @@ func (f *GitHubFormatter) formatStrippedFieldsFooter(b *strings.Builder, strippe
 	b.WriteString("These overrides won't persist when merged to main.\n\n")
 	b.WriteString("_To disable field stripping, set `--no-strip-defaults` flag_\n")
 	b.WriteString("</details>\n")
+}
+
+// isArrayOrSlice checks if a value is an array or slice
+func isArrayOrSlice(v interface{}) bool {
+	if v == nil {
+		return false
+	}
+	rv := reflect.ValueOf(v)
+	k := rv.Kind()
+	return k == reflect.Array || k == reflect.Slice
+}
+
+// formatArrayDiff formats array differences using set-based comparison
+func (f *GitHubFormatter) formatArrayDiff(b *strings.Builder, field string, comparison differ.FieldComparison) {
+	declaredItems := toStringSlice(comparison.Declared)
+	actualItems := toStringSlice(comparison.Actual)
+
+	additions := setDiff(declaredItems, actualItems)
+	removals := setDiff(actualItems, declaredItems)
+	orderDiffers := !slicesEqual(declaredItems, actualItems)
+
+	b.WriteString(fmt.Sprintf("- **`%s`**: ", field))
+
+	if len(additions) == 0 && len(removals) == 0 {
+		if orderDiffers {
+			b.WriteString("Order differs\n")
+		} else {
+			b.WriteString("No changes (should not appear)\n")
+		}
+	} else {
+		parts := []string{}
+		if len(additions) > 0 {
+			parts = append(parts, fmt.Sprintf("%d addition(s)", len(additions)))
+		}
+		if len(removals) > 0 {
+			parts = append(parts, fmt.Sprintf("%d removal(s)", len(removals)))
+		}
+		if orderDiffers && len(additions) == 0 && len(removals) == 0 {
+			parts = append(parts, "order differs")
+		}
+		b.WriteString(strings.Join(parts, ", "))
+		b.WriteString("\n")
+
+		if len(additions) > 0 {
+			b.WriteString(fmt.Sprintf("  - Additions: `%s`\n", formatStringSlice(additions)))
+		}
+		if len(removals) > 0 {
+			b.WriteString(fmt.Sprintf("  - Removals: `%s`\n", formatStringSlice(removals)))
+		}
+		if orderDiffers && len(additions) == 0 && len(removals) == 0 {
+			b.WriteString("  - Note: Items are the same but order differs\n")
+		}
+	}
+	b.WriteString("\n")
+}
+
+// toStringSlice converts an interface{} to a string slice for comparison
+func toStringSlice(v interface{}) []string {
+	if v == nil {
+		return []string{}
+	}
+
+	rv := reflect.ValueOf(v)
+	if rv.Kind() != reflect.Array && rv.Kind() != reflect.Slice {
+		// Not an array/slice, return string representation
+		return []string{fmt.Sprintf("%v", v)}
+	}
+
+	result := make([]string, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		result[i] = fmt.Sprintf("%v", rv.Index(i).Interface())
+	}
+	return result
+}
+
+// setDiff returns elements in a that are not in b
+func setDiff(a, b []string) []string {
+	bSet := make(map[string]bool)
+	for _, item := range b {
+		bSet[item] = true
+	}
+
+	var diff []string
+	for _, item := range a {
+		if !bSet[item] {
+			diff = append(diff, item)
+		}
+	}
+	return diff
+}
+
+// slicesEqual checks if two string slices are equal (order matters)
+func slicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// formatStringSlice formats a string slice for display
+func formatStringSlice(items []string) string {
+	if len(items) == 0 {
+		return "(none)"
+	}
+	return strings.Join(items, ", ")
 }
