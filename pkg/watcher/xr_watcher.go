@@ -3,6 +3,7 @@ package watcher
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -10,6 +11,7 @@ import (
 	"github.com/millstonehq/crossplane-plan/pkg/differ"
 	"github.com/millstonehq/crossplane-plan/pkg/formatter"
 	"github.com/millstonehq/crossplane-plan/pkg/vcs/github"
+	"github.com/millstonehq/crossplane-plan/pkg/workqueue"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -17,6 +19,8 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/leaderelection"
+	"k8s.io/client-go/tools/leaderelection/resourcelock"
 )
 
 // XRWatcher watches Crossplane Composite Resources and posts diffs to GitHub
@@ -30,6 +34,8 @@ type XRWatcher struct {
 	logger                 logr.Logger
 	processedXRs           map[string]string // name -> resource version
 	reconciliationInterval int               // minutes
+	workQueue              *workqueue.PRWorkQueue
+	cfg                    *rest.Config
 }
 
 // NewXRWatcher creates a new XRWatcher
@@ -54,7 +60,7 @@ func NewXRWatcher(
 		panic(fmt.Sprintf("failed to create dynamic client: %v", err))
 	}
 
-	return &XRWatcher{
+	watcher := &XRWatcher{
 		clientset:              clientset,
 		dynamicClient:          dynamicClient,
 		detector:               detector,
@@ -64,13 +70,74 @@ func NewXRWatcher(
 		logger:                 logger,
 		processedXRs:           make(map[string]string),
 		reconciliationInterval: reconciliationInterval,
+		cfg:                    cfg,
 	}
+
+	// Create work queue with 5-second debounce
+	watcher.workQueue = workqueue.NewPRWorkQueue(watcher, logger, 5*time.Second)
+
+	return watcher
 }
 
-// Start begins watching Crossplane XRs
+// Start begins watching Crossplane XRs with leader election
 func (w *XRWatcher) Start(ctx context.Context) error {
-	w.logger.Info("Starting XR watcher")
+	w.logger.Info("Starting XR watcher with leader election")
 
+	// Get pod identity for leader election
+	podName := os.Getenv("POD_NAME")
+	if podName == "" {
+		podName = "crossplane-plan-unknown"
+		w.logger.Info("POD_NAME not set, using default", "identity", podName)
+	}
+
+	podNamespace := os.Getenv("POD_NAMESPACE")
+	if podNamespace == "" {
+		podNamespace = "crossplane-system"
+		w.logger.Info("POD_NAMESPACE not set, using default", "namespace", podNamespace)
+	}
+
+	// Create leader election lock
+	lock := &resourcelock.LeaseLock{
+		LeaseMeta: metav1.ObjectMeta{
+			Name:      "crossplane-plan-leader",
+			Namespace: podNamespace,
+		},
+		Client: w.clientset.CoordinationV1(),
+		LockConfig: resourcelock.ResourceLockConfig{
+			Identity: podName,
+		},
+	}
+
+	// Run leader election
+	leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
+		Lock:            lock,
+		ReleaseOnCancel: true,
+		LeaseDuration:   15 * time.Second,
+		RenewDeadline:   10 * time.Second,
+		RetryPeriod:     2 * time.Second,
+		Callbacks: leaderelection.LeaderCallbacks{
+			OnStartedLeading: func(ctx context.Context) {
+				w.logger.Info("Acquired leadership, starting watchers")
+				if err := w.run(ctx); err != nil {
+					w.logger.Error(err, "Failed to run watchers")
+				}
+			},
+			OnStoppedLeading: func() {
+				w.logger.Info("Lost leadership, stopping")
+			},
+			OnNewLeader: func(identity string) {
+				if identity != podName {
+					w.logger.Info("New leader elected", "leader", identity)
+				}
+			},
+		},
+	})
+
+	return nil
+}
+
+// run contains the main watcher logic (called by leader election)
+func (w *XRWatcher) run(ctx context.Context) error {
 	// Discover Crossplane XRD GVRs
 	gvrs, err := w.discoverXRDGVRs(ctx)
 	if err != nil {
@@ -361,21 +428,58 @@ func (w *XRWatcher) handlePRBatch(ctx context.Context, prNumber int, xrs []*unst
 	return nil
 }
 
-// handleXREvent processes an XR event
+// ProcessPR implements the workqueue.PRProcessor interface
+// This is called by the work queue after debouncing
+func (w *XRWatcher) ProcessPR(ctx context.Context, prNumber int) error {
+	w.logger.Info("Processing all resources for PR", "prNumber", prNumber)
+
+	// Query all XRs for this PR across all GVRs
+	xrs, err := w.findAllPRResources(ctx, prNumber)
+	if err != nil {
+		return fmt.Errorf("failed to find PR resources: %w", err)
+	}
+
+	if len(xrs) == 0 {
+		w.logger.Info("No resources found for PR", "prNumber", prNumber)
+		return nil
+	}
+
+	w.logger.Info("Found resources for PR", "prNumber", prNumber, "count", len(xrs))
+
+	// Process all XRs as a batch
+	return w.handlePRBatch(ctx, prNumber, xrs)
+}
+
+// findAllPRResources queries all XRs matching the given PR number
+func (w *XRWatcher) findAllPRResources(ctx context.Context, prNumber int) ([]*unstructured.Unstructured, error) {
+	gvrs, err := w.discoverXRDGVRs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to discover XRDs: %w", err)
+	}
+
+	var allXRs []*unstructured.Unstructured
+	for _, gvr := range gvrs {
+		list, err := w.dynamicClient.Resource(gvr).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			w.logger.Error(err, "failed to list resources", "gvr", gvr.String())
+			continue
+		}
+
+		for _, item := range list.Items {
+			xr := item.DeepCopy()
+			if w.detector.DetectPR(xr) == prNumber {
+				allXRs = append(allXRs, xr)
+			}
+		}
+	}
+
+	return allXRs, nil
+}
+
+// handleXREvent processes an XR event by enqueueing it for batch processing
 func (w *XRWatcher) handleXREvent(ctx context.Context, eventType watch.EventType, xr *unstructured.Unstructured) {
 	name := xr.GetName()
 	namespace := xr.GetNamespace()
-	resourceVersion := xr.GetResourceVersion()
-
-	// Check if we've already processed this version
-	key := fmt.Sprintf("%s/%s", namespace, name)
-	if namespace == "" {
-		key = name
-	}
-
-	if lastVersion, exists := w.processedXRs[key]; exists && lastVersion == resourceVersion {
-		return // Already processed
-	}
 
 	// Detect PR number
 	prNumber := w.detector.DetectPR(xr)
@@ -391,47 +495,6 @@ func (w *XRWatcher) handleXREvent(ctx context.Context, eventType watch.EventType
 		"prNumber", prNumber,
 	)
 
-	// Clone the XR and rename it to the production name
-	// This allows crossplane-diff to compare against production resources
-	baseName := w.detector.GetBaseName(xr)
-	xrForDiff := xr.DeepCopy()
-	xrForDiff.SetName(baseName)
-
-	// Clear immutable metadata fields that would cause dry-run apply to fail
-	xrForDiff.SetUID("")
-	xrForDiff.SetResourceVersion("")
-	xrForDiff.SetGeneration(0)
-	xrForDiff.SetCreationTimestamp(metav1.Time{})
-	xrForDiff.SetManagedFields(nil)
-
-	w.logger.Info("Comparing PR XR against production",
-		"prName", name,
-		"productionName", baseName,
-	)
-
-	// Calculate diff using renamed XR
-	// crossplane-diff will look for managed resources labeled with the production name
-	diff, err := w.differ.CalculateDiff(ctx, xrForDiff)
-	if err != nil {
-		w.logger.Error(err, "failed to calculate diff", "name", name)
-		return
-	}
-
-	// Format for GitHub
-	comment := w.formatter.FormatDiff(xr, diff)
-
-	// Post to GitHub (if VCS client is configured)
-	if w.vcsClient != nil {
-		if err := w.vcsClient.PostComment(ctx, prNumber, comment); err != nil {
-			w.logger.Error(err, "failed to post GitHub comment", "prNumber", prNumber)
-			return
-		}
-		w.logger.Info("Posted GitHub comment", "prNumber", prNumber)
-	} else {
-		// Dry-run mode: log the comment
-		w.logger.Info("Dry-run: would post comment", "prNumber", prNumber, "comment", comment)
-	}
-
-	// Mark as processed
-	w.processedXRs[key] = resourceVersion
+	// Enqueue for batch processing (debounced)
+	w.workQueue.Enqueue(ctx, prNumber)
 }
