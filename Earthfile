@@ -156,9 +156,12 @@ kubedock-publish:
     # Run with: earthly --push +kubedock-publish
     BUILD --platform=linux/amd64 --platform=linux/arm64 +kubedock-image --tag=$tag
 
-# all runs all checks and builds
+# all runs all checks and builds sequentially
 all:
     ARG SRC_PATH=.
-    BUILD +test --SRC_PATH=${SRC_PATH}
-    BUILD +lint --SRC_PATH=${SRC_PATH}
-    BUILD +build --SRC_PATH=${SRC_PATH}
+    FROM +test --SRC_PATH=${SRC_PATH}
+    RUN echo "Tests passed"
+    FROM +lint --SRC_PATH=${SRC_PATH}
+    RUN echo "Lint passed"
+    FROM +build --SRC_PATH=${SRC_PATH}
+    RUN echo "Build passed"
