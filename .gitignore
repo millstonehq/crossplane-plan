@@ -19,3 +19,4 @@ coverage.html
 *.tmp
 *.swp
 *~
+# Test trigger
