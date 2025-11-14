@@ -159,9 +159,22 @@ kubedock-publish:
 # all runs all checks and builds sequentially
 all:
     ARG SRC_PATH=.
-    FROM +test --SRC_PATH=${SRC_PATH}
-    RUN echo "Tests passed"
-    FROM +lint --SRC_PATH=${SRC_PATH}
-    RUN echo "Lint passed"
-    FROM +build --SRC_PATH=${SRC_PATH}
-    RUN echo "Build passed"
+    FROM +deps --SRC_PATH=${SRC_PATH}
+
+    COPY --dir ${SRC_PATH}/cmd ${SRC_PATH}/pkg ./
+
+    # Run test
+    RUN CGO_ENABLED=0 go test -v -cover ./...
+
+    # Run lint
+    RUN go vet ./...
+    RUN go fmt ./...
+
+    # Run build
+    ARG TARGETARCH
+    RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
+        -ldflags="-w -s" \
+        -o /app/bin/crossplane-plan \
+        ./cmd/crossplane-plan
+
+    SAVE ARTIFACT /app/bin/crossplane-plan AS LOCAL bin/crossplane-plan
