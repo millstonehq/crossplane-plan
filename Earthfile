@@ -7,29 +7,30 @@ IMPORT ../../lib/build-config/base AS base
 # NOTE: SRC_PATH defaults to "." for standalone FOSS repo.
 # Monorepo delegation passes --SRC_PATH=tools/crossplane-plan to find files at the right location.
 
-# deps downloads and caches Go dependencies
+# deps downloads and caches Go dependencies (runs on native BUILDPLATFORM)
 deps:
     ARG SRC_PATH=.
-    FROM go+base-go --GOLANG_VERSION=1.25
+    ARG BUILDPLATFORM
+    FROM --platform=$BUILDPLATFORM go+base-go --GOLANG_VERSION=1.25
     WORKDIR /app
 
     COPY ${SRC_PATH}/go.mod ${SRC_PATH}/go.sum ./
-    RUN go mod download -x
+    ENV GIT_TERMINAL_PROMPT=0
+    RUN CGO_ENABLED=0 GOPROXY=https://proxy.golang.org,direct go mod download
 
     SAVE ARTIFACT go.mod
     SAVE ARTIFACT go.sum
 
-# build compiles the crossplane-plan binary
+# build compiles the crossplane-plan binary (runs on native BUILDPLATFORM, cross-compiles)
 build:
     ARG SRC_PATH=.
-    FROM +deps --SRC_PATH=${SRC_PATH}
+    ARG BUILDPLATFORM
+    ARG TARGETARCH
+    FROM --platform=$BUILDPLATFORM +deps --SRC_PATH=${SRC_PATH}
 
     COPY --dir ${SRC_PATH}/cmd ${SRC_PATH}/pkg ./
-    COPY ${SRC_PATH}/go.mod ${SRC_PATH}/go.sum ./
 
     # Build for target architecture with CGO disabled for static binary
-    # TARGETARCH is built-in and set automatically by Earthly based on --platform
-    ARG TARGETARCH
     RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
         -ldflags="-w -s" \
         -o /app/bin/crossplane-plan \
@@ -37,13 +38,13 @@ build:
 
     SAVE ARTIFACT /app/bin/crossplane-plan AS LOCAL bin/crossplane-plan
 
-# test runs unit tests with coverage gate
+# test runs unit tests with coverage gate (runs on native BUILDPLATFORM)
 test:
     ARG SRC_PATH=.
-    FROM +deps --SRC_PATH=${SRC_PATH}
+    ARG BUILDPLATFORM
+    FROM --platform=$BUILDPLATFORM +deps --SRC_PATH=${SRC_PATH}
 
     COPY --dir ${SRC_PATH}/cmd ${SRC_PATH}/pkg ./
-    COPY ${SRC_PATH}/go.mod ${SRC_PATH}/go.sum ./
 
     # Run tests with coverage
     RUN CGO_ENABLED=0 go test -v ./...
@@ -62,13 +63,13 @@ test:
         fi && \
         echo "✅ Coverage $COVERAGE% meets minimum threshold"
 
-# lint runs go vet and other linting
+# lint runs go vet and other linting (runs on native BUILDPLATFORM)
 lint:
     ARG SRC_PATH=.
-    FROM +deps --SRC_PATH=${SRC_PATH}
+    ARG BUILDPLATFORM
+    FROM --platform=$BUILDPLATFORM +deps --SRC_PATH=${SRC_PATH}
 
     COPY --dir ${SRC_PATH}/cmd ${SRC_PATH}/pkg ./
-    COPY ${SRC_PATH}/go.mod ${SRC_PATH}/go.sum ./
 
     RUN go vet ./...
     RUN go fmt ./...
@@ -156,10 +157,12 @@ kubedock-publish:
     # Run with: earthly --push +kubedock-publish
     BUILD --platform=linux/amd64 --platform=linux/arm64 +kubedock-image --tag=$tag
 
-# all runs all checks and builds sequentially
+# all runs all checks and builds sequentially (runs on native BUILDPLATFORM)
 all:
     ARG SRC_PATH=.
-    FROM +deps --SRC_PATH=${SRC_PATH}
+    ARG BUILDPLATFORM
+    ARG TARGETARCH
+    FROM --platform=$BUILDPLATFORM +deps --SRC_PATH=${SRC_PATH}
 
     COPY --dir ${SRC_PATH}/cmd ${SRC_PATH}/pkg ./
 
@@ -170,8 +173,7 @@ all:
     RUN go vet ./...
     RUN go fmt ./...
 
-    # Run build
-    ARG TARGETARCH
+    # Run build (cross-compile for target arch)
     RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
         -ldflags="-w -s" \
         -o /app/bin/crossplane-plan \
