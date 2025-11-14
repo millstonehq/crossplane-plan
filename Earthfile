@@ -4,12 +4,16 @@ PROJECT millstonehq/crossplane-plan
 IMPORT ../../lib/build-config/go AS go
 IMPORT ../../lib/build-config/base AS base
 
+# NOTE: SRC_PATH defaults to "." for standalone FOSS repo.
+# Monorepo delegation passes --SRC_PATH=tools/crossplane-plan to find files at the right location.
+
 # deps downloads and caches Go dependencies
 deps:
+    ARG SRC_PATH=.
     FROM go+base-go --GOLANG_VERSION=1.25
     WORKDIR /app
 
-    COPY go.mod go.sum ./
+    COPY ${SRC_PATH}/go.mod ${SRC_PATH}/go.sum ./
     RUN go mod download
 
     SAVE ARTIFACT go.mod
@@ -17,10 +21,11 @@ deps:
 
 # build compiles the crossplane-plan binary
 build:
-    FROM +deps
+    ARG SRC_PATH=.
+    FROM +deps --SRC_PATH=${SRC_PATH}
 
-    COPY --dir cmd pkg ./
-    COPY go.mod go.sum ./
+    COPY --dir ${SRC_PATH}/cmd ${SRC_PATH}/pkg ./
+    COPY ${SRC_PATH}/go.mod ${SRC_PATH}/go.sum ./
 
     # Build for target architecture with CGO disabled for static binary
     # TARGETARCH is built-in and set automatically by Earthly based on --platform
@@ -34,14 +39,15 @@ build:
 
 # test runs unit tests with coverage gate
 test:
-    FROM +deps
-    
-    COPY --dir cmd pkg ./
-    COPY go.mod go.sum ./
-    
+    ARG SRC_PATH=.
+    FROM +deps --SRC_PATH=${SRC_PATH}
+
+    COPY --dir ${SRC_PATH}/cmd ${SRC_PATH}/pkg ./
+    COPY ${SRC_PATH}/go.mod ${SRC_PATH}/go.sum ./
+
     # Run tests with coverage
     RUN CGO_ENABLED=0 go test -v ./...
-    
+
     # Run coverage and enforce 40% minimum (excluding watcher which requires integration tests)
     RUN CGO_ENABLED=0 go test -cover -coverprofile=coverage.out ./pkg/... && \
         grep -v "pkg/watcher/" coverage.out > coverage-filtered.out && \
@@ -58,11 +64,12 @@ test:
 
 # lint runs go vet and other linting
 lint:
-    FROM +deps
-    
-    COPY --dir cmd pkg ./
-    COPY go.mod go.sum ./
-    
+    ARG SRC_PATH=.
+    FROM +deps --SRC_PATH=${SRC_PATH}
+
+    COPY --dir ${SRC_PATH}/cmd ${SRC_PATH}/pkg ./
+    COPY ${SRC_PATH}/go.mod ${SRC_PATH}/go.sum ./
+
     RUN go vet ./...
     RUN go fmt ./...
 
@@ -151,6 +158,7 @@ kubedock-publish:
 
 # all runs all checks and builds
 all:
-    BUILD +test
-    BUILD +lint
-    BUILD +build
+    ARG SRC_PATH=.
+    BUILD +test --SRC_PATH=${SRC_PATH}
+    BUILD +lint --SRC_PATH=${SRC_PATH}
+    BUILD +build --SRC_PATH=${SRC_PATH}
