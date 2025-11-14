@@ -4,7 +4,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/crossplane/crossplane-runtime/v2/pkg/logging"
+	"github.com/millstonehq/crossplane-plan/pkg/config"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/client-go/rest"
 )
 
 func TestCalculator_generateSummary_NoChanges(t *testing.T) {
@@ -107,5 +110,48 @@ func TestCalculator_generateSummary_OnlyDeletions(t *testing.T) {
 
 	if !strings.Contains(summary, "-2") {
 		t.Error("Summary should show -2 deletions")
+	}
+}
+
+func TestNewCalculator(t *testing.T) {
+	// Use an empty config (won't actually connect to cluster for this test)
+	cfg := &rest.Config{}
+	logger := logging.NewNopLogger()
+
+	calc := NewCalculator(cfg, logger)
+
+	if calc == nil {
+		t.Fatal("NewCalculator() returned nil")
+	}
+
+	if calc.config != cfg {
+		t.Error("Calculator config not set correctly")
+	}
+
+	if calc.logger == nil {
+		t.Error("Calculator logger not set")
+	}
+
+	if calc.initialized {
+		t.Error("Calculator should not be initialized on creation")
+	}
+}
+
+func TestCalculator_SetSanitizer(t *testing.T) {
+	calc := &Calculator{}
+
+	rules := []config.StripRule{
+		{Path: "test.path", Reason: "test"},
+	}
+	sanitizer := NewSanitizer(rules)
+
+	calc.SetSanitizer(sanitizer)
+
+	if calc.sanitizer == nil {
+		t.Fatal("SetSanitizer() did not set sanitizer")
+	}
+
+	if calc.sanitizer != sanitizer {
+		t.Error("SetSanitizer() did not set the correct sanitizer instance")
 	}
 }

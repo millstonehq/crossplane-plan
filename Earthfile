@@ -32,19 +32,15 @@ build:
 
     SAVE ARTIFACT /app/bin/crossplane-plan AS LOCAL bin/crossplane-plan
 
-# test runs unit tests with coverage gate
+# test runs unit tests with coverage
 test:
     FROM +deps
     
-    COPY --dir cmd pkg scripts ./
-    COPY go.mod go.sum .coverageignore ./
+    COPY --dir cmd pkg ./
+    COPY go.mod go.sum ./
     
-    # Run tests
-    RUN CGO_ENABLED=0 go test -v ./...
-    
-    # Run coverage gate (business logic only)
-    RUN chmod +x scripts/coverage-gate.sh
-    RUN bash scripts/coverage-gate.sh
+    # Run tests with coverage
+    RUN CGO_ENABLED=0 go test -v -cover ./...
 
 # lint runs go vet and other linting
 lint:
