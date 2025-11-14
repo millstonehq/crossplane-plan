@@ -32,7 +32,7 @@ build:
 
     SAVE ARTIFACT /app/bin/crossplane-plan AS LOCAL bin/crossplane-plan
 
-# test runs unit tests with coverage
+# test runs unit tests with coverage gate
 test:
     FROM +deps
     
@@ -40,7 +40,21 @@ test:
     COPY go.mod go.sum ./
     
     # Run tests with coverage
-    RUN CGO_ENABLED=0 go test -v -cover ./...
+    RUN CGO_ENABLED=0 go test -v ./...
+    
+    # Run coverage and enforce 40% minimum (excluding watcher which requires integration tests)
+    RUN CGO_ENABLED=0 go test -cover -coverprofile=coverage.out ./pkg/... && \
+        grep -v "pkg/watcher/" coverage.out > coverage-filtered.out && \
+        COVERAGE=$(go tool cover -func=coverage-filtered.out | grep total | awk '{print $3}' | sed 's/%//') && \
+        echo "" && \
+        echo "Coverage Report (excluding pkg/watcher):" && \
+        echo "Total Coverage: $COVERAGE%" && \
+        echo "Threshold:      40.0%" && \
+        if [ $(echo "$COVERAGE < 40" | bc -l) -eq 1 ]; then \
+            echo "❌ Coverage $COVERAGE% is below minimum 40%"; \
+            exit 1; \
+        fi && \
+        echo "✅ Coverage $COVERAGE% meets minimum threshold"
 
 # lint runs go vet and other linting
 lint:
