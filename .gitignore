@@ -1,6 +1,6 @@
 # Binaries
 /bin/
-crossplane-plan
+/crossplane-plan
 *.exe
 *.dll
 *.so

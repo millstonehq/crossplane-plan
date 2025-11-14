@@ -14,7 +14,7 @@ deps:
     WORKDIR /app
 
     COPY ${SRC_PATH}/go.mod ${SRC_PATH}/go.sum ./
-    RUN go mod download
+    RUN go mod download -x
 
     SAVE ARTIFACT go.mod
     SAVE ARTIFACT go.sum
