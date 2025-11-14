@@ -528,7 +528,7 @@ func (w *XRWatcher) detectDeletions(ctx context.Context, prNumber int, prResourc
 				deletionDiff := &differ.DiffResult{
 					XR:         prodXR,
 					HasChanges: true,
-					Summary:    fmt.Sprintf("⚠️  Resource will be **DELETED**"),
+					Summary:    "⚠️  Resource will be **DELETED**",
 					RawDiff:    fmt.Sprintf("Resource %s/%s will be deleted", prodXR.GetKind(), prodName),
 					ManagedResources: []differ.ManagedResourceState{},
 					StrippedFields:   []differ.StrippedField{},
