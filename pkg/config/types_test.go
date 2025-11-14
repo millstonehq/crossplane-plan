@@ -43,11 +43,11 @@ func TestDefaultConfig(t *testing.T) {
 func TestLoadConfig_EmptyPath(t *testing.T) {
 	cfg, err := LoadConfig("")
 	if err != nil {
-		t.Fatalf("LoadConfig("") error = %v, want nil", err)
+		t.Fatalf("LoadConfig() with empty path error = %v, want nil", err)
 	}
 
 	if cfg == nil {
-		t.Fatal("LoadConfig("") returned nil config")
+		t.Fatal("LoadConfig() with empty path returned nil config")
 	}
 
 	// Should return default config
@@ -81,7 +81,7 @@ func TestLoadConfig_ValidFile(t *testing.T) {
   stripDefaults: false
   stripRules:
     - path: "metadata.labels"
-      pattern: "^custom\.io/.*"
+      pattern: "^custom\\.io/.*"
       reason: "Custom labels"
     - path: "spec.someField"
       equals: "testValue"

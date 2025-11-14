@@ -6,12 +6,12 @@ IMPORT ../../lib/build-config/base AS base
 
 # deps downloads and caches Go dependencies
 deps:
-    FROM go+base-go --GOLANG_VERSION=1.22
+    FROM go+base-go --GOLANG_VERSION=1.25
     WORKDIR /app
-    
+
     COPY go.mod go.sum ./
     RUN go mod download
-    
+
     SAVE ARTIFACT go.mod
     SAVE ARTIFACT go.sum
 
@@ -83,7 +83,7 @@ publish:
 
 # kubedock-deps clones kubedock repo and downloads dependencies
 kubedock-deps:
-    FROM go+base-go --GOLANG_VERSION=1.22
+    FROM go+base-go --GOLANG_VERSION=1.25
     WORKDIR /kubedock
 
     # Clone kubedock at specific version
