@@ -1,17 +1,22 @@
 VERSION 0.8
 PROJECT millstonehq/crossplane-plan
 
-IMPORT ../../lib/build-config/go AS go
-IMPORT ../../lib/build-config/base AS base
+IMPORT github.com/millstonehq/base-images:v1.0.0 AS base
 
 # NOTE: SRC_PATH defaults to "." for standalone FOSS repo.
 # Monorepo delegation passes --SRC_PATH=tools/crossplane-plan to find files at the right location.
+
+
+
+# ========================================
+# Build Targets
+# ========================================
 
 # deps downloads and caches Go dependencies (runs on native BUILDPLATFORM)
 deps:
     ARG SRC_PATH=.
     ARG BUILDPLATFORM
-    FROM --platform=$BUILDPLATFORM go+base-go --GOLANG_VERSION=1.25
+    FROM --platform=$BUILDPLATFORM base+base-go --GOLANG_VERSION=1.25
     WORKDIR /app
 
     COPY ${SRC_PATH}/go.mod ${SRC_PATH}/go.sum ./
@@ -79,7 +84,7 @@ image:
     # Multi-platform build - TARGETPLATFORM/TARGETARCH are built-in and set by Earthly
     ARG TARGETPLATFORM
     ARG TARGETARCH
-    FROM --platform=$TARGETPLATFORM go+base-go-runtime
+    FROM --platform=$TARGETPLATFORM base+base-go-runtime
 
     USER nonroot
     WORKDIR /app
@@ -105,7 +110,7 @@ publish:
 
 # kubedock-deps clones kubedock repo and downloads dependencies
 kubedock-deps:
-    FROM go+base-go --GOLANG_VERSION=1.25
+    FROM base+base-go --GOLANG_VERSION=1.25
     WORKDIR /kubedock
 
     # Clone kubedock at specific version
@@ -134,7 +139,7 @@ kubedock-build:
 kubedock-image:
     ARG TARGETPLATFORM
     ARG TARGETARCH
-    FROM --platform=$TARGETPLATFORM go+base-go-runtime
+    FROM --platform=$TARGETPLATFORM base+base-go-runtime
 
     USER nonroot
     WORKDIR /app
