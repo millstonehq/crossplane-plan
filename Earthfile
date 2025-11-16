@@ -37,7 +37,7 @@ build:
 
     # Debug: Show what platform we're actually running on and timing
     RUN echo "======================================" && \
-        echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Build Debug Info:" && \
+        echo "Build Debug Info [$(date +%s)]:" && \
         echo "BUILDPLATFORM=${BUILDPLATFORM}" && \
         echo "GOOS=${GOOS}" && \
         echo "GOARCH=${GOARCH}" && \
@@ -47,12 +47,12 @@ build:
         echo "======================================="
 
     # Build for target architecture with CGO disabled for static binary
-    RUN echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Starting go build for GOARCH=${GOARCH}..." && \
-        time CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build \
+    RUN echo "[$(date +%s)] Starting go build for GOARCH=${GOARCH}..." && \
+        CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build \
         -ldflags="-w -s" \
         -o /app/bin/crossplane-plan \
         ./cmd/crossplane-plan && \
-        echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Finished go build for GOARCH=${GOARCH}"
+        echo "[$(date +%s)] Finished go build for GOARCH=${GOARCH}"
 
     SAVE ARTIFACT /app/bin/crossplane-plan AS LOCAL bin/crossplane-plan
 
