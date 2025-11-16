@@ -28,14 +28,14 @@ jobs:
 
       - name: Build and Test (PR)
         if: github.event_name == 'pull_request'
-        uses: ./.github/actions/build
+        uses: ./.github/actions/earthly-build
         with:
           earthly-target: '+all'
           push: 'false'
 
       - name: Build, Test and Publish (Main)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: ./.github/actions/build
+        uses: ./.github/actions/earthly-build
         with:
           earthly-target: '+publish'
           push: 'true'
