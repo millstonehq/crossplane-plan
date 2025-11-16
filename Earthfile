@@ -13,7 +13,7 @@ PROJECT millstonehq/crossplane-plan
 # deps downloads and caches Go dependencies (runs on native BUILDPLATFORM)
 deps:
     ARG SRC_PATH=.
-    ARG BUILDPLATFORM
+    ARG BUILDPLATFORM  # Declare built-in for visibility, but don't override it
     FROM --platform=$BUILDPLATFORM ghcr.io/millstonehq/go:1.25
     WORKDIR /app
 
@@ -27,7 +27,7 @@ deps:
 # build compiles the crossplane-plan binary (runs on native BUILDPLATFORM, cross-compiles)
 build:
     ARG SRC_PATH=.
-    ARG BUILDPLATFORM
+    ARG BUILDPLATFORM  # Declare built-in for visibility, but don't override it
     # Custom args that can be safely passed from other targets (not built-ins)
     ARG GOOS=linux
     ARG GOARCH
@@ -35,18 +35,31 @@ build:
 
     COPY --dir ${SRC_PATH}/cmd ${SRC_PATH}/pkg ./
 
+    # Debug: Show what platform we're actually running on and timing
+    RUN echo "======================================" && \
+        echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Build Debug Info:" && \
+        echo "BUILDPLATFORM=${BUILDPLATFORM}" && \
+        echo "GOOS=${GOOS}" && \
+        echo "GOARCH=${GOARCH}" && \
+        echo "Running on: $(uname -m)" && \
+        echo "OS: $(uname -s)" && \
+        cat /proc/cpuinfo | grep "model name" | head -1 || echo "CPU info not available" && \
+        echo "======================================="
+
     # Build for target architecture with CGO disabled for static binary
-    RUN CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build \
+    RUN echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Starting go build for GOARCH=${GOARCH}..." && \
+        time CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build \
         -ldflags="-w -s" \
         -o /app/bin/crossplane-plan \
-        ./cmd/crossplane-plan
+        ./cmd/crossplane-plan && \
+        echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Finished go build for GOARCH=${GOARCH}"
 
     SAVE ARTIFACT /app/bin/crossplane-plan AS LOCAL bin/crossplane-plan
 
 # test runs unit tests with coverage gate (runs on native BUILDPLATFORM)
 test:
     ARG SRC_PATH=.
-    ARG BUILDPLATFORM
+    ARG BUILDPLATFORM  # Declare built-in for visibility, but don't override it
     FROM --platform=$BUILDPLATFORM +deps --SRC_PATH=${SRC_PATH}
 
     COPY --dir ${SRC_PATH}/cmd ${SRC_PATH}/pkg ./
@@ -71,7 +84,7 @@ test:
 # lint runs go vet and other linting (runs on native BUILDPLATFORM)
 lint:
     ARG SRC_PATH=.
-    ARG BUILDPLATFORM
+    ARG BUILDPLATFORM  # Declare built-in for visibility, but don't override it
     FROM --platform=$BUILDPLATFORM +deps --SRC_PATH=${SRC_PATH}
 
     COPY --dir ${SRC_PATH}/cmd ${SRC_PATH}/pkg ./
@@ -166,7 +179,7 @@ kubedock-publish:
 # all runs all checks and builds sequentially (runs on native BUILDPLATFORM)
 all:
     ARG SRC_PATH=.
-    ARG BUILDPLATFORM
+    ARG BUILDPLATFORM  # Declare built-in for visibility, but don't override it
     ARG GOOS=linux
     ARG GOARCH=amd64
     FROM --platform=$BUILDPLATFORM +deps --SRC_PATH=${SRC_PATH}
