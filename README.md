@@ -108,5 +108,3 @@ go test -v ./...
 ## License
 
 Apache 2.0
-
-

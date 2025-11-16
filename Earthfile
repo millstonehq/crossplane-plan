@@ -10,10 +10,11 @@ PROJECT millstonehq/crossplane-plan
 # Build Targets
 # ========================================
 
-# deps downloads and caches Go dependencies (always runs on amd64 for fast builds)
+# deps downloads and caches Go dependencies (runs on native BUILDPLATFORM)
 deps:
     ARG SRC_PATH=.
-    FROM --platform=linux/amd64 ghcr.io/millstonehq/go:1.25
+    ARG BUILDPLATFORM
+    FROM --platform=$BUILDPLATFORM ghcr.io/millstonehq/go:1.25
     WORKDIR /app
 
     COPY ${SRC_PATH}/go.mod ${SRC_PATH}/go.sum ./
@@ -23,40 +24,28 @@ deps:
     SAVE ARTIFACT go.mod
     SAVE ARTIFACT go.sum
 
-# build compiles the crossplane-plan binary (always runs on amd64, cross-compiles)
+# build compiles the crossplane-plan binary (runs on native BUILDPLATFORM, cross-compiles)
 build:
     ARG SRC_PATH=.
-    # Custom args that can be safely passed from other targets (not built-ins)
-    ARG GOOS=linux
-    ARG GOARCH
-    FROM +deps --SRC_PATH=${SRC_PATH}
+    ARG BUILDPLATFORM
+    ARG TARGETARCH
+    FROM --platform=$BUILDPLATFORM +deps --SRC_PATH=${SRC_PATH}
 
     COPY --dir ${SRC_PATH}/cmd ${SRC_PATH}/pkg ./
 
-    # Debug: Show what platform we're actually running on and timing
-    RUN echo "======================================" && \
-        echo "Build Debug Info [$(date +%s)]:" && \
-        echo "GOOS=${GOOS}" && \
-        echo "GOARCH=${GOARCH}" && \
-        echo "Running on: $(uname -m)" && \
-        echo "OS: $(uname -s)" && \
-        cat /proc/cpuinfo | grep "model name" | head -1 || echo "CPU info not available" && \
-        echo "======================================="
-
     # Build for target architecture with CGO disabled for static binary
-    RUN echo "[$(date +%s)] Starting go build for GOARCH=${GOARCH}..." && \
-        CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build \
+    RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
         -ldflags="-w -s" \
         -o /app/bin/crossplane-plan \
-        ./cmd/crossplane-plan && \
-        echo "[$(date +%s)] Finished go build for GOARCH=${GOARCH}"
+        ./cmd/crossplane-plan
 
     SAVE ARTIFACT /app/bin/crossplane-plan AS LOCAL bin/crossplane-plan
 
-# test runs unit tests with coverage gate (always runs on amd64)
+# test runs unit tests with coverage gate (runs on native BUILDPLATFORM)
 test:
     ARG SRC_PATH=.
-    FROM +deps --SRC_PATH=${SRC_PATH}
+    ARG BUILDPLATFORM
+    FROM --platform=$BUILDPLATFORM +deps --SRC_PATH=${SRC_PATH}
 
     COPY --dir ${SRC_PATH}/cmd ${SRC_PATH}/pkg ./
 
@@ -77,10 +66,11 @@ test:
         fi && \
         echo "✅ Coverage $COVERAGE% meets minimum threshold"
 
-# lint runs go vet and other linting (always runs on amd64)
+# lint runs go vet and other linting (runs on native BUILDPLATFORM)
 lint:
     ARG SRC_PATH=.
-    FROM +deps --SRC_PATH=${SRC_PATH}
+    ARG BUILDPLATFORM
+    FROM --platform=$BUILDPLATFORM +deps --SRC_PATH=${SRC_PATH}
 
     COPY --dir ${SRC_PATH}/cmd ${SRC_PATH}/pkg ./
 
@@ -91,15 +81,14 @@ lint:
 image:
     # Multi-platform build - TARGETPLATFORM/TARGETARCH are built-in and set by Earthly
     ARG TARGETPLATFORM
-    ARG TARGETOS
     ARG TARGETARCH
     FROM --platform=$TARGETPLATFORM ghcr.io/millstonehq/go:1.25-runtime
 
     USER nonroot
     WORKDIR /app
 
-    # Copy binary from build stage - map built-in args to custom GOOS/GOARCH
-    COPY (+build/crossplane-plan --GOOS=$TARGETOS --GOARCH=$TARGETARCH) /app/crossplane-plan
+    # Copy binary from build stage
+    COPY +build/crossplane-plan /app/crossplane-plan
 
     ENTRYPOINT ["/app/crossplane-plan"]
 
@@ -171,12 +160,12 @@ kubedock-publish:
     # Run with: earthly --push +kubedock-publish
     BUILD --platform=linux/amd64 --platform=linux/arm64 +kubedock-image --tag=$tag
 
-# all runs all checks and builds sequentially (always runs on amd64)
+# all runs all checks and builds sequentially (runs on native BUILDPLATFORM)
 all:
     ARG SRC_PATH=.
-    ARG GOOS=linux
-    ARG GOARCH=amd64
-    FROM +deps --SRC_PATH=${SRC_PATH}
+    ARG BUILDPLATFORM
+    ARG TARGETARCH
+    FROM --platform=$BUILDPLATFORM +deps --SRC_PATH=${SRC_PATH}
 
     COPY --dir ${SRC_PATH}/cmd ${SRC_PATH}/pkg ./
 
@@ -188,7 +177,7 @@ all:
     RUN go fmt ./...
 
     # Run build (cross-compile for target arch)
-    RUN CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build \
+    RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
         -ldflags="-w -s" \
         -o /app/bin/crossplane-plan \
         ./cmd/crossplane-plan
