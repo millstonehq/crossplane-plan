@@ -87,8 +87,8 @@ image:
     USER nonroot
     WORKDIR /app
 
-    # Copy binary from build stage
-    COPY +build/crossplane-plan /app/crossplane-plan
+    # Copy binary from build stage (pass TARGETARCH for cross-compilation)
+    COPY (+build/crossplane-plan --TARGETARCH=$TARGETARCH) /app/crossplane-plan
 
     ENTRYPOINT ["/app/crossplane-plan"]
 
