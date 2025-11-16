@@ -28,13 +28,15 @@ deps:
 build:
     ARG SRC_PATH=.
     ARG BUILDPLATFORM
-    ARG TARGETARCH
+    # Custom args that can be safely passed from other targets (not built-ins)
+    ARG GOOS=linux
+    ARG GOARCH
     FROM --platform=$BUILDPLATFORM +deps --SRC_PATH=${SRC_PATH}
 
     COPY --dir ${SRC_PATH}/cmd ${SRC_PATH}/pkg ./
 
     # Build for target architecture with CGO disabled for static binary
-    RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
+    RUN CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build \
         -ldflags="-w -s" \
         -o /app/bin/crossplane-plan \
         ./cmd/crossplane-plan
@@ -81,14 +83,15 @@ lint:
 image:
     # Multi-platform build - TARGETPLATFORM/TARGETARCH are built-in and set by Earthly
     ARG TARGETPLATFORM
+    ARG TARGETOS
     ARG TARGETARCH
     FROM --platform=$TARGETPLATFORM ghcr.io/millstonehq/go:1.25-runtime
 
     USER nonroot
     WORKDIR /app
 
-    # Copy binary from build stage (pass TARGETARCH for cross-compilation)
-    COPY (+build/crossplane-plan --TARGETARCH=$TARGETARCH) /app/crossplane-plan
+    # Copy binary from build stage - map built-in args to custom GOOS/GOARCH
+    COPY (+build/crossplane-plan --GOOS=$TARGETOS --GOARCH=$TARGETARCH) /app/crossplane-plan
 
     ENTRYPOINT ["/app/crossplane-plan"]
 
@@ -164,7 +167,8 @@ kubedock-publish:
 all:
     ARG SRC_PATH=.
     ARG BUILDPLATFORM
-    ARG TARGETARCH
+    ARG GOOS=linux
+    ARG GOARCH=amd64
     FROM --platform=$BUILDPLATFORM +deps --SRC_PATH=${SRC_PATH}
 
     COPY --dir ${SRC_PATH}/cmd ${SRC_PATH}/pkg ./
@@ -177,7 +181,7 @@ all:
     RUN go fmt ./...
 
     # Run build (cross-compile for target arch)
-    RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
+    RUN CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build \
         -ldflags="-w -s" \
         -o /app/bin/crossplane-plan \
         ./cmd/crossplane-plan
