@@ -74,6 +74,67 @@ jobs:
             echo "✓ Will trigger import: external contribution detected"
           fi
 
+      - name: Debug GitHub App Secrets
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.check-origin.outputs.is_from_mill == 'false'
+        env:
+          APP_ID: ${{ secrets.COPYBARA_APP_ID }}
+          PRIVATE_KEY: ${{ secrets.COPYBARA_APP_PRIVATE_KEY }}
+        run: |
+          echo "=== GitHub App Secret Validation ==="
+
+          # Check APP_ID
+          if [ -z "$APP_ID" ]; then
+            echo "❌ COPYBARA_APP_ID is empty or not set"
+            exit 1
+          else
+            echo "✅ COPYBARA_APP_ID is set (length: ${#APP_ID})"
+            # Check if it's numeric (GitHub App IDs are numbers)
+            if [[ "$APP_ID" =~ ^[0-9]+$ ]]; then
+              echo "✅ COPYBARA_APP_ID format looks valid (numeric)"
+            else
+              echo "⚠️  COPYBARA_APP_ID is not numeric (expected numeric App ID)"
+            fi
+          fi
+
+          # Check PRIVATE_KEY
+          if [ -z "$PRIVATE_KEY" ]; then
+            echo "❌ COPYBARA_APP_PRIVATE_KEY is empty or not set"
+            exit 1
+          else
+            echo "✅ COPYBARA_APP_PRIVATE_KEY is set (length: ${#PRIVATE_KEY} chars)"
+
+            # Check if it starts with PEM header (GitHub will mask the value but we can check format)
+            if [[ "$PRIVATE_KEY" == "-----BEGIN"* ]]; then
+              echo "✅ PRIVATE_KEY starts with '-----BEGIN' (valid PEM format)"
+            else
+              echo "❌ PRIVATE_KEY does not start with '-----BEGIN' (invalid PEM format)"
+              echo "First 20 chars: ${PRIVATE_KEY:0:20}"
+              exit 1
+            fi
+
+            # Check if it contains expected PEM structure
+            if [[ "$PRIVATE_KEY" == *"-----END"* ]]; then
+              echo "✅ PRIVATE_KEY contains '-----END' (valid PEM format)"
+            else
+              echo "❌ PRIVATE_KEY missing '-----END' (invalid PEM format)"
+              exit 1
+            fi
+
+            # Validate private key with OpenSSL
+            echo "🔍 Validating private key with OpenSSL..."
+            echo "$PRIVATE_KEY" | openssl pkey -noout -text 2>&1 | head -20 || {
+              echo "❌ OpenSSL validation failed. Trying RSA format..."
+              echo "$PRIVATE_KEY" | openssl rsa -noout -text 2>&1 | head -20 || {
+                echo "❌ Private key is malformed - OpenSSL cannot parse it"
+                echo "This suggests the private key secret value is corrupted or in wrong format"
+                exit 1
+              }
+            }
+            echo "✅ OpenSSL successfully validated the private key format"
+          fi
+
+          echo "=== All secret validation checks passed ==="
+
       - name: Generate GitHub App Token for Cross-Repo Dispatch
         if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.check-origin.outputs.is_from_mill == 'false'
         id: app-token
