@@ -10,11 +10,10 @@ PROJECT millstonehq/crossplane-plan
 # Build Targets
 # ========================================
 
-# deps downloads and caches Go dependencies (runs on native BUILDPLATFORM)
+# deps downloads and caches Go dependencies (always runs on amd64 for fast builds)
 deps:
     ARG SRC_PATH=.
-    ARG BUILDPLATFORM  # Declare built-in for visibility, but don't override it
-    FROM --platform=$BUILDPLATFORM ghcr.io/millstonehq/go:1.25
+    FROM --platform=linux/amd64 ghcr.io/millstonehq/go:1.25
     WORKDIR /app
 
     COPY ${SRC_PATH}/go.mod ${SRC_PATH}/go.sum ./
@@ -24,21 +23,19 @@ deps:
     SAVE ARTIFACT go.mod
     SAVE ARTIFACT go.sum
 
-# build compiles the crossplane-plan binary (runs on native BUILDPLATFORM, cross-compiles)
+# build compiles the crossplane-plan binary (always runs on amd64, cross-compiles)
 build:
     ARG SRC_PATH=.
-    ARG BUILDPLATFORM  # Declare built-in for visibility, but don't override it
     # Custom args that can be safely passed from other targets (not built-ins)
     ARG GOOS=linux
     ARG GOARCH
-    FROM --platform=$BUILDPLATFORM +deps --SRC_PATH=${SRC_PATH}
+    FROM +deps --SRC_PATH=${SRC_PATH}
 
     COPY --dir ${SRC_PATH}/cmd ${SRC_PATH}/pkg ./
 
     # Debug: Show what platform we're actually running on and timing
     RUN echo "======================================" && \
         echo "Build Debug Info [$(date +%s)]:" && \
-        echo "BUILDPLATFORM=${BUILDPLATFORM}" && \
         echo "GOOS=${GOOS}" && \
         echo "GOARCH=${GOARCH}" && \
         echo "Running on: $(uname -m)" && \
@@ -56,11 +53,10 @@ build:
 
     SAVE ARTIFACT /app/bin/crossplane-plan AS LOCAL bin/crossplane-plan
 
-# test runs unit tests with coverage gate (runs on native BUILDPLATFORM)
+# test runs unit tests with coverage gate (always runs on amd64)
 test:
     ARG SRC_PATH=.
-    ARG BUILDPLATFORM  # Declare built-in for visibility, but don't override it
-    FROM --platform=$BUILDPLATFORM +deps --SRC_PATH=${SRC_PATH}
+    FROM +deps --SRC_PATH=${SRC_PATH}
 
     COPY --dir ${SRC_PATH}/cmd ${SRC_PATH}/pkg ./
 
@@ -81,11 +77,10 @@ test:
         fi && \
         echo "✅ Coverage $COVERAGE% meets minimum threshold"
 
-# lint runs go vet and other linting (runs on native BUILDPLATFORM)
+# lint runs go vet and other linting (always runs on amd64)
 lint:
     ARG SRC_PATH=.
-    ARG BUILDPLATFORM  # Declare built-in for visibility, but don't override it
-    FROM --platform=$BUILDPLATFORM +deps --SRC_PATH=${SRC_PATH}
+    FROM +deps --SRC_PATH=${SRC_PATH}
 
     COPY --dir ${SRC_PATH}/cmd ${SRC_PATH}/pkg ./
 
@@ -176,13 +171,12 @@ kubedock-publish:
     # Run with: earthly --push +kubedock-publish
     BUILD --platform=linux/amd64 --platform=linux/arm64 +kubedock-image --tag=$tag
 
-# all runs all checks and builds sequentially (runs on native BUILDPLATFORM)
+# all runs all checks and builds sequentially (always runs on amd64)
 all:
     ARG SRC_PATH=.
-    ARG BUILDPLATFORM  # Declare built-in for visibility, but don't override it
     ARG GOOS=linux
     ARG GOARCH=amd64
-    FROM --platform=$BUILDPLATFORM +deps --SRC_PATH=${SRC_PATH}
+    FROM +deps --SRC_PATH=${SRC_PATH}
 
     COPY --dir ${SRC_PATH}/cmd ${SRC_PATH}/pkg ./
 
