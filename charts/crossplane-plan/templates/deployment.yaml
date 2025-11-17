@@ -30,27 +30,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       containers:
-        # KubeDock sidecar: emulates Docker API for Crossplane function execution
-        - name: kubedock
-          image: {{ include "crossplane-plan.kubedockImage" . }}
-          imagePullPolicy: {{ .Values.kubedock.image.pullPolicy }}
-          args:
-            - server
-            - --unix-socket
-            - /var/run/docker.sock
-            - --reverse-proxy
-          volumeMounts:
-            - name: docker-sock
-              mountPath: /var/run
-          {{- with .Values.kubedock.resources }}
-          resources:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          {{- with .Values.kubedock.securityContext }}
-          securityContext:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-
+        # Main container: crossplane-plan (listed first as default for kubectl logs)
         - name: crossplane-plan
           image: {{ include "crossplane-plan.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
@@ -104,6 +84,27 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           {{- with .Values.podSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+
+        # KubeDock sidecar: emulates Docker API for Crossplane function execution
+        - name: kubedock
+          image: {{ include "crossplane-plan.kubedockImage" . }}
+          imagePullPolicy: {{ .Values.kubedock.image.pullPolicy }}
+          args:
+            - server
+            - --unix-socket
+            - /var/run/docker.sock
+            - --reverse-proxy
+          volumeMounts:
+            - name: docker-sock
+              mountPath: /var/run
+          {{- with .Values.kubedock.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.kubedock.securityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
