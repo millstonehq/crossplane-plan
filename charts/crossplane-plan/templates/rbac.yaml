@@ -1,0 +1,132 @@
+{{- if .Values.serviceAccount.create -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "crossplane-plan.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "crossplane-plan.labels" . | nindent 4 }}
+  {{- with .Values.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- if .Values.rbac.create }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "crossplane-plan.fullname" . }}
+  labels:
+    {{- include "crossplane-plan.labels" . | nindent 4 }}
+rules:
+  # Read Crossplane XRDs to discover composite resources
+  - apiGroups:
+      - apiextensions.crossplane.io
+    resources:
+      - compositeresourcedefinitions
+    verbs:
+      - get
+      - list
+      - watch
+  
+  # Read all composite resources (XRs) across all API groups
+  # This is dynamic based on XRDs in the cluster
+  # IMPORTANT: patch is required for dry-run apply during diff calculation
+  - apiGroups:
+      - "*"
+    resources:
+      - "*"
+    verbs:
+      - get
+      - list
+      - watch
+      - patch
+  
+  # Read compositions for rendering
+  - apiGroups:
+      - apiextensions.crossplane.io
+    resources:
+      - compositions
+      - compositionrevisions
+    verbs:
+      - get
+      - list
+  
+  # Read provider configs and managed resources for diff calculation
+  - apiGroups:
+      - "*"
+    resources:
+      - "*"
+    verbs:
+      - get
+      - list
+  
+  # Read secrets for provider credentials (crossplane-diff needs this)
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - get
+      - list
+  
+  # Read environment configs
+  - apiGroups:
+      - apiextensions.crossplane.io
+    resources:
+      - environmentconfigs
+    verbs:
+      - get
+      - list
+
+  # KubeDock permissions: create/manage pods for Crossplane function execution
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+      - pods/log
+      - pods/status
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - watch
+
+  # KubeDock permissions: create services for pod networking
+  - apiGroups:
+      - ""
+    resources:
+      - services
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+
+  # Leader election permissions: manage leases for HA
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - get
+      - create
+      - update
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "crossplane-plan.fullname" . }}
+  labels:
+    {{- include "crossplane-plan.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "crossplane-plan.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "crossplane-plan.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

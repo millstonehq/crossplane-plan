@@ -1,0 +1,54 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "crossplane-plan.configMapName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "crossplane-plan.labels" . | nindent 4 }}
+  {{- with include "crossplane-plan.annotations" . }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
+data:
+  # PR detection strategy: name, label, or annotation
+  detection-strategy: {{ .Values.detection.strategy | quote }}
+
+  # Name pattern for name-based detection
+  # Example: pr-{number}-* matches pr-123-mill
+  name-pattern: {{ .Values.detection.namePattern | quote }}
+
+  # GitHub repository for posting comments (format: owner/repo)
+  github-repo: {{ .Values.github.repo | quote }}
+
+  # Label key for label-based detection (optional)
+  label-key: {{ .Values.detection.labelKey | quote }}
+
+  # Annotation key for annotation-based detection (optional)
+  annotation-key: {{ .Values.detection.annotationKey | quote }}
+
+  # Authentication:
+  # Authentication credentials are configured via the github-creds Secret
+  # Two authentication methods are supported:
+  #
+  # 1. GitHub App (RECOMMENDED):
+  #    - Higher rate limits (5000 req/hour per installation)
+  #    - Better security (scoped permissions)
+  #    - Easier credential rotation
+  #    - Required secret keys: app-id, installation-id, private-key
+  #
+  # 2. Personal Access Token (PAT):
+  #    - Simple to set up
+  #    - Required secret key: token
+  #    - Required scope: repo (for posting PR comments)
+
+  # Field stripping configuration
+  config.yaml: |
+    # Diff configuration
+    diff:
+      # Enable built-in default strip rules
+      stripDefaults: {{ .Values.config.diff.stripDefaults }}
+{{- if .Values.config.diff.stripRules }}
+      # Additional user-defined strip rules
+      stripRules:
+{{ .Values.config.diff.stripRules | toYaml | nindent 8 }}
+{{- end }}

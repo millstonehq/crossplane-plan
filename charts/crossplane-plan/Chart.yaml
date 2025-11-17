@@ -1,0 +1,27 @@
+apiVersion: v2
+name: crossplane-plan
+description: Automated Crossplane PR preview diff tool with GitHub integration
+type: application
+
+# Chart version - update this when making changes to the chart
+version: 0.1.0
+
+# Application version - matches the tool version
+appVersion: "latest"
+
+maintainers:
+  - name: Millstone Team
+
+home: https://github.com/millstonehq/mill/tree/main/tools/crossplane-plan
+sources:
+  - https://github.com/millstonehq/mill/tree/main/tools/crossplane-plan
+
+keywords:
+  - crossplane
+  - preview
+  - diff
+  - gitops
+  - pr-automation
+
+annotations:
+  category: Infrastructure

@@ -1,0 +1,26 @@
+crossplane-plan has been deployed!
+
+Configuration:
+- Detection Strategy: {{ .Values.detection.strategy }}
+- Name Pattern: {{ .Values.detection.namePattern }}
+- GitHub Repo: {{ .Values.github.repo }}
+- Replicas: {{ .Values.replicas }}
+
+Resources:
+- Deployment: {{ include "crossplane-plan.fullname" . }}
+- ServiceAccount: {{ include "crossplane-plan.serviceAccountName" . }}
+- ConfigMap: {{ include "crossplane-plan.configMapName" . }}
+
+The tool will automatically:
+1. Detect PR preview resources using: {{ .Values.detection.strategy }} detection
+2. Calculate diffs using Crossplane function runner
+3. Post diff comments to GitHub PRs
+
+Check the deployment status:
+  kubectl get deployment {{ include "crossplane-plan.fullname" . }} -n {{ .Release.Namespace }}
+
+View logs:
+  kubectl logs -f deployment/{{ include "crossplane-plan.fullname" . }} -n {{ .Release.Namespace }} -c crossplane-plan
+
+View leader election status:
+  kubectl get lease -n {{ .Release.Namespace }}

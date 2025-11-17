@@ -1,0 +1,132 @@
+# Default values for crossplane-plan
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# Image configuration
+image:
+  repository: ghcr.io/millstonehq/crossplane-plan
+  # Image tag (overrides chart appVersion)
+  tag: ""  # defaults to chart appVersion
+  pullPolicy: Always
+
+# Kubedock sidecar for Docker API emulation
+kubedock:
+  image:
+    repository: ghcr.io/millstonehq/kubedock
+    tag: "0.18.3"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: true
+
+# Deployment configuration
+# HA-ready: leader election ensures only one replica processes events
+replicas: 3
+
+# Resource limits for crossplane-plan container
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# Detection configuration
+detection:
+  # PR detection strategy: name, label, or annotation
+  strategy: name
+  # Name pattern for name-based detection (e.g., pr-{number}-* matches pr-123-mill)
+  namePattern: "pr-{number}-*"
+  # Label key for label-based detection (optional)
+  labelKey: "millstone.tech/pr-number"
+  # Annotation key for annotation-based detection (optional)
+  annotationKey: "millstone.tech/preview-pr"
+
+# GitHub configuration
+github:
+  # GitHub repository for posting comments (format: owner/repo)
+  repo: "millstonehq/mill"
+  # Secret reference for GitHub credentials
+  # Uses same secret as crossplane-provider-github
+  credentialsSecretName: github-creds
+  credentialsSecretKey: credentials
+
+# Field stripping configuration
+config:
+  diff:
+    # Enable built-in default strip rules
+    stripDefaults: true
+    # Additional user-defined strip rules
+    stripRules: []
+    # Example:
+    # - path: spec.someField
+    #   equals: "someValue"
+    #   reason: "Custom field to strip"
+    # - path: metadata.labels
+    #   pattern: "^custom\\.label\\.prefix/.*"
+    #   reason: "Custom label prefix"
+
+# Security context for the deployment
+securityContext:
+  fsGroup: 65532
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+# Pod security context for crossplane-plan container
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+
+# Image pull secrets
+imagePullSecrets:
+  - name: ghcr-pull-secret
+
+# Service account configuration
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # The name of the service account to use
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+  # Annotations to add to the service account
+  annotations: {}
+
+# RBAC configuration
+rbac:
+  # Specifies whether RBAC resources should be created
+  create: true
+
+# Additional labels to apply to all resources
+additionalLabels: {}
+  # environment: production
+  # team: platform
+
+# Additional annotations to apply to all resources
+additionalAnnotations: {}
+  # example.com/annotation: value
+
+# Sync wave for ArgoCD (controls deployment order)
+syncWave: "4"
+
+# Name overrides
+nameOverride: ""
+fullnameOverride: ""
