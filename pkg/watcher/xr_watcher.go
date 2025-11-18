@@ -2,11 +2,13 @@ package watcher
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/millstonehq/crossplane-plan/pkg/argocd"
 	"github.com/millstonehq/crossplane-plan/pkg/detector"
 	"github.com/millstonehq/crossplane-plan/pkg/differ"
 	"github.com/millstonehq/crossplane-plan/pkg/formatter"
@@ -31,6 +33,7 @@ type XRWatcher struct {
 	differ                 *differ.Calculator
 	formatter              *formatter.GitHubFormatter
 	vcsClient              *github.Client
+	argocdClient           *argocd.Client
 	logger                 logr.Logger
 	processedXRs           map[string]string // name -> resource version
 	reconciliationInterval int               // minutes
@@ -45,6 +48,7 @@ func NewXRWatcher(
 	differ *differ.Calculator,
 	formatter *formatter.GitHubFormatter,
 	vcsClient *github.Client,
+	argocdClient *argocd.Client,
 	logger logr.Logger,
 	reconciliationInterval int,
 ) *XRWatcher {
@@ -67,6 +71,7 @@ func NewXRWatcher(
 		differ:                 differ,
 		formatter:              formatter,
 		vcsClient:              vcsClient,
+		argocdClient:           argocdClient,
 		logger:                 logger,
 		processedXRs:           make(map[string]string),
 		reconciliationInterval: reconciliationInterval,
@@ -343,8 +348,30 @@ func (w *XRWatcher) watchGVROnce(ctx context.Context, gvr schema.GroupVersionRes
 
 // handlePRBatch processes all XRs for a single PR and posts one combined comment
 func (w *XRWatcher) handlePRBatch(ctx context.Context, prNumber int, xrs []*unstructured.Unstructured) error {
-	results := make(map[string]*differ.DiffResult)
+	if len(xrs) == 0 {
+		return nil
+	}
 
+	results := make(map[string]*differ.DiffResult)
+	var argocdDiff *argocd.AppDiff
+	var scope *Scope
+
+	// 1. Discover scope from first PR XR (all should have same ArgoCD app label)
+	if w.argocdClient != nil {
+		discoveredScope, err := w.DiscoverScope(xrs[0])
+		if err != nil {
+			w.logger.Error(err, "failed to discover scope, falling back to legacy detection",
+				"xr", xrs[0].GetName())
+			// Continue without ArgoCD integration (degraded mode)
+		} else {
+			scope = discoveredScope
+			w.logger.Info("Discovered scope",
+				"prApp", scope.PRAppName,
+				"prodApp", scope.ProdAppName)
+		}
+	}
+
+	// 2. Run crossplane-diff for composition preview (existing behavior)
 	for _, xr := range xrs {
 		name := xr.GetName()
 		namespace := xr.GetNamespace()
@@ -380,14 +407,53 @@ func (w *XRWatcher) handlePRBatch(ctx context.Context, prNumber int, xrs []*unst
 		}
 
 		// Store result using original XR name as key
-		// Always include all resources (even with no changes) for complete batch view
 		results[name] = diff
 	}
 
-	// Detect deletions: find production resources that don't have PR equivalents
-	if err := w.detectDeletions(ctx, prNumber, xrs, results); err != nil {
-		w.logger.Error(err, "failed to detect deletions", "prNumber", prNumber)
-		// Continue anyway - deletions are not critical for the diff
+	// 3. NEW: ArgoCD diff for deletions + bare resources
+	if w.argocdClient != nil && scope != nil {
+		appDiff, err := w.argocdClient.GetAppDiff(ctx, scope.PRAppName, scope.ProdAppName)
+		if err != nil {
+			if errors.Is(err, argocd.ErrNotFound) {
+				w.logger.Info("ArgoCD diff unavailable, using fallback deletion detection",
+					"prApp", scope.PRAppName,
+					"prodApp", scope.ProdAppName)
+				// Fall back to legacy deletion detection
+				if err := w.detectDeletions(ctx, prNumber, xrs, results); err != nil {
+					w.logger.Error(err, "legacy deletion detection failed", "prNumber", prNumber)
+				}
+			} else {
+				w.logger.Error(err, "ArgoCD diff failed, using fallback",
+					"prApp", scope.PRAppName,
+					"prodApp", scope.ProdAppName)
+				// Continue with fallback
+				if err := w.detectDeletions(ctx, prNumber, xrs, results); err != nil {
+					w.logger.Error(err, "legacy deletion detection failed", "prNumber", prNumber)
+				}
+			}
+		} else {
+			// Successfully got ArgoCD diff
+			argocdDiff = appDiff
+			w.logger.Info("ArgoCD diff complete",
+				"additions", len(appDiff.Additions),
+				"modifications", len(appDiff.Modifications),
+				"deletions", len(appDiff.Deletions))
+
+			// Add ArgoCD deletions to results
+			for _, deletion := range appDiff.Deletions {
+				key := fmt.Sprintf("DELETED-%s", deletion.Name)
+				results[key] = &differ.DiffResult{
+					HasChanges: true,
+					Summary:    fmt.Sprintf("⚠️ %s will be **DELETED** (ArgoCD)", deletion.GVK.Kind),
+					RawDiff:    deletion.RawDiff,
+				}
+			}
+		}
+	} else {
+		// No ArgoCD client or scope - use legacy deletion detection
+		if err := w.detectDeletions(ctx, prNumber, xrs, results); err != nil {
+			w.logger.Error(err, "failed to detect deletions", "prNumber", prNumber)
+		}
 	}
 
 	// If no results, nothing to post
@@ -397,14 +463,14 @@ func (w *XRWatcher) handlePRBatch(ctx context.Context, prNumber int, xrs []*unst
 
 	// Format combined comment
 	var comment string
-	if len(results) == 1 {
-		// Single XR - use simple format
+	if len(results) == 1 && argocdDiff == nil {
+		// Single XR with no ArgoCD diff - use simple format
 		for _, diff := range results {
 			comment = w.formatter.FormatDiff(xrs[0], diff)
 		}
 	} else {
-		// Multiple XRs - use combined format
-		comment = w.formatter.FormatMultipleDiffs(results)
+		// Multiple XRs or ArgoCD diff present - use combined format
+		comment = w.formatter.FormatMultipleDiffs(results, argocdDiff)
 	}
 
 	// Post to GitHub

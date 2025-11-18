@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/millstonehq/crossplane-plan/pkg/argocd"
 	"github.com/millstonehq/crossplane-plan/pkg/differ"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/yaml"
@@ -163,11 +164,18 @@ func (f *GitHubFormatter) formatInfrastructureDrift(b *strings.Builder, managedR
 }
 
 // FormatMultipleDiffs formats multiple XR diffs into a single comment
-func (f *GitHubFormatter) FormatMultipleDiffs(results map[string]*differ.DiffResult) string {
+// argocdDiff is optional - pass nil if ArgoCD integration is not available
+func (f *GitHubFormatter) FormatMultipleDiffs(results map[string]*differ.DiffResult, argocdDiff *argocd.AppDiff) string {
 	var b strings.Builder
 
 	// Header
 	b.WriteString("## 🔄 Crossplane Preview\n\n")
+
+	// ArgoCD Sync Preview Section (if available)
+	if argocdDiff != nil {
+		f.formatArgoCDDiff(&b, argocdDiff)
+		b.WriteString("---\n\n")
+	}
 
 	// Count total changes
 	totalChanges := 0
@@ -181,11 +189,22 @@ func (f *GitHubFormatter) FormatMultipleDiffs(results map[string]*differ.DiffRes
 	// Summary
 	b.WriteString(fmt.Sprintf("**Resources:** %d total, %d with changes\n\n", totalResources, totalChanges))
 
-	if totalChanges == 0 {
+	if totalChanges == 0 && argocdDiff == nil {
 		b.WriteString("### ✅ No Changes\n\n")
 		b.WriteString("This PR will not modify any infrastructure resources.\n")
 		return b.String()
 	}
+
+	if totalChanges == 0 {
+		// We have ArgoCD diff but no crossplane-diff changes
+		b.WriteString("### ✅ No Composition Changes\n\n")
+		b.WriteString("Crossplane compositions will not create additional resources.\n\n")
+		f.formatStrippedFieldsFooter(&b, []differ.StrippedField{})
+		return b.String()
+	}
+
+	// Add header for composition preview section
+	b.WriteString("### 🔧 Crossplane Composition Preview\n\n")
 
 	// Separate modifications and deletions for better presentation
 	modifications := make(map[string]*differ.DiffResult)
@@ -271,6 +290,81 @@ func (f *GitHubFormatter) FormatMultipleDiffs(results map[string]*differ.DiffRes
 	f.formatStrippedFieldsFooter(&b, allStrippedFields)
 
 	return b.String()
+}
+
+// formatArgoCDDiff formats the ArgoCD Application diff section
+func (f *GitHubFormatter) formatArgoCDDiff(b *strings.Builder, diff *argocd.AppDiff) {
+	b.WriteString("### 📦 ArgoCD Sync Preview\n\n")
+	b.WriteString("The following changes will be applied when this PR merges:\n\n")
+
+	totalChanges := len(diff.Additions) + len(diff.Modifications) + len(diff.Deletions)
+	if totalChanges == 0 {
+		b.WriteString("**No ArgoCD-managed resource changes detected.**\n\n")
+		return
+	}
+
+	// Summary counts
+	summary := []string{}
+	if len(diff.Additions) > 0 {
+		summary = append(summary, fmt.Sprintf("**%d** new", len(diff.Additions)))
+	}
+	if len(diff.Modifications) > 0 {
+		summary = append(summary, fmt.Sprintf("**%d** modified", len(diff.Modifications)))
+	}
+	if len(diff.Deletions) > 0 {
+		summary = append(summary, fmt.Sprintf("**%d** deleted", len(diff.Deletions)))
+	}
+	b.WriteString(strings.Join(summary, ", "))
+	b.WriteString("\n\n")
+
+	// Show additions
+	if len(diff.Additions) > 0 {
+		b.WriteString("**✨ New Resources:**\n\n")
+		for _, add := range diff.Additions {
+			resourceID := fmt.Sprintf("%s/%s", add.GVK.Kind, add.Name)
+			if add.Namespace != "" {
+				resourceID = fmt.Sprintf("%s/%s (%s)", add.GVK.Kind, add.Name, add.Namespace)
+			}
+			b.WriteString(fmt.Sprintf("- `%s`\n", resourceID))
+		}
+		b.WriteString("\n")
+	}
+
+	// Show modifications
+	if len(diff.Modifications) > 0 {
+		b.WriteString("**✏️ Modified Resources:**\n\n")
+		for _, mod := range diff.Modifications {
+			resourceID := fmt.Sprintf("%s/%s", mod.GVK.Kind, mod.Name)
+			if mod.Namespace != "" {
+				resourceID = fmt.Sprintf("%s/%s (%s)", mod.GVK.Kind, mod.Name, mod.Namespace)
+			}
+			b.WriteString(fmt.Sprintf("- `%s`\n", resourceID))
+		}
+		b.WriteString("\n")
+	}
+
+	// Show deletions with warning
+	if len(diff.Deletions) > 0 {
+		b.WriteString("**⚠️ Resources to be Deleted:**\n\n")
+		for _, del := range diff.Deletions {
+			resourceID := fmt.Sprintf("%s/%s", del.GVK.Kind, del.Name)
+			if del.Namespace != "" {
+				resourceID = fmt.Sprintf("%s/%s (%s)", del.GVK.Kind, del.Name, del.Namespace)
+			}
+			b.WriteString(fmt.Sprintf("- 🗑️ `%s` will be **pruned** by ArgoCD\n", resourceID))
+		}
+		b.WriteString("\n")
+	}
+
+	// Optional: Full diff details
+	if diff.RawDiff != "" {
+		b.WriteString("<details>\n")
+		b.WriteString("<summary>📄 View Full ArgoCD Diff</summary>\n\n")
+		b.WriteString("```diff\n")
+		b.WriteString(diff.RawDiff)
+		b.WriteString("\n```\n")
+		b.WriteString("</details>\n\n")
+	}
 }
 
 // formatStrippedFieldsFooter adds a transparency footer showing stripped fields

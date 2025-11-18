@@ -64,6 +64,18 @@ github:
   credentialsSecretName: github-creds
   credentialsSecretKey: credentials
 
+# ArgoCD configuration
+argocd:
+  # Enable ArgoCD integration for enhanced deletion detection
+  enabled: true
+  # ArgoCD namespace (where ArgoCD Applications are stored)
+  namespace: argocd
+  # PR app naming pattern
+  prPrefix: "pr-"  # Detects "pr-123-myapp" patterns
+  prSuffix: ""     # Optional suffix pattern (e.g., "-pr" for "myapp-pr-123")
+  # Degraded mode: continue without ArgoCD if diff fails
+  degradedMode: true
+
 # Field stripping configuration
 config:
   diff:
