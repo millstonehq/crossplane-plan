@@ -8,12 +8,14 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/millstonehq/crossplane-plan/pkg/argocd"
 	"github.com/millstonehq/crossplane-plan/pkg/config"
 	"github.com/millstonehq/crossplane-plan/pkg/detector"
 	"github.com/millstonehq/crossplane-plan/pkg/differ"
 	"github.com/millstonehq/crossplane-plan/pkg/formatter"
 	"github.com/millstonehq/crossplane-plan/pkg/vcs/github"
 	"github.com/millstonehq/crossplane-plan/pkg/watcher"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -35,6 +37,10 @@ var (
 	reconciliationInterval  int
 	configPath              string
 	noStripDefaults         bool
+	argocdEnabled           bool
+	argocdNamespace         string
+	argocdPRPrefix          string
+	argocdPRSuffix          string
 )
 
 func init() {
@@ -51,6 +57,10 @@ func init() {
 	flag.IntVar(&reconciliationInterval, "reconciliation-interval", 5, "Periodic reconciliation interval in minutes (0 to disable)")
 	flag.StringVar(&configPath, "config", "/etc/crossplane-plan/config.yaml", "Path to config file for field stripping rules")
 	flag.BoolVar(&noStripDefaults, "no-strip-defaults", false, "Disable default field stripping rules")
+	flag.BoolVar(&argocdEnabled, "argocd-enabled", true, "Enable ArgoCD integration for enhanced deletion detection")
+	flag.StringVar(&argocdNamespace, "argocd-namespace", "argocd", "ArgoCD namespace")
+	flag.StringVar(&argocdPRPrefix, "argocd-pr-prefix", "pr-", "ArgoCD PR app name prefix (e.g., 'pr-' for 'pr-123-myapp')")
+	flag.StringVar(&argocdPRSuffix, "argocd-pr-suffix", "", "ArgoCD PR app name suffix (optional)")
 }
 
 func main() {
@@ -159,6 +169,29 @@ func main() {
 		)
 	}
 
+	// Create ArgoCD client (if enabled)
+	var argocdClient *argocd.Client
+	if argocdEnabled {
+		dynamicClient, err := dynamic.NewForConfig(cfg)
+		if err != nil {
+			logrLogger.Error(err, "failed to create dynamic client for ArgoCD")
+			os.Exit(1)
+		}
+		argocdClient = argocd.NewClient(
+			dynamicClient,
+			argocdNamespace,
+			argocdPRPrefix,
+			argocdPRSuffix,
+			logrLogger,
+		)
+		logger.Info("ArgoCD client created",
+			"namespace", argocdNamespace,
+			"prPrefix", argocdPRPrefix,
+		)
+	} else {
+		logger.Info("ArgoCD integration disabled")
+	}
+
 	// Create and start watcher
 	xrWatcher := watcher.NewXRWatcher(
 		clientset,
@@ -166,6 +199,7 @@ func main() {
 		diffCalculator,
 		diffFormatter,
 		vcsClient,
+		argocdClient,
 		logrLogger,
 		reconciliationInterval,
 	)

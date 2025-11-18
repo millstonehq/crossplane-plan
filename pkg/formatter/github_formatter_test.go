@@ -109,7 +109,7 @@ func TestGitHubFormatter_FormatMultipleDiffs_NoChanges(t *testing.T) {
 		},
 	}
 
-	output := formatter.FormatMultipleDiffs(results)
+	output := formatter.FormatMultipleDiffs(results, nil)
 
 	if !strings.Contains(output, "**Resources:** 2 total, 0 with changes") {
 		t.Error("Missing resource count")
@@ -134,7 +134,7 @@ func TestGitHubFormatter_FormatMultipleDiffs_WithChanges(t *testing.T) {
 		},
 	}
 
-	output := formatter.FormatMultipleDiffs(results)
+	output := formatter.FormatMultipleDiffs(results, nil)
 
 	if !strings.Contains(output, "**Resources:** 2 total, 1 with changes") {
 		t.Error("Missing resource count")
@@ -174,7 +174,7 @@ func TestGitHubFormatter_FormatMultipleDiffs_WithDeletions(t *testing.T) {
 		},
 	}
 
-	output := formatter.FormatMultipleDiffs(results)
+	output := formatter.FormatMultipleDiffs(results, nil)
 
 	if !strings.Contains(output, "**Resources:** 2 total, 2 with changes") {
 		t.Error("Missing resource count")
@@ -221,7 +221,7 @@ func TestGitHubFormatter_FormatMultipleDiffs_MixedChanges(t *testing.T) {
 		},
 	}
 
-	output := formatter.FormatMultipleDiffs(results)
+	output := formatter.FormatMultipleDiffs(results, nil)
 
 	if !strings.Contains(output, "**Resources:** 3 total, 2 with changes") {
 		t.Error("Missing resource count")

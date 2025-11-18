@@ -114,6 +114,17 @@ rules:
       - get
       - create
       - update
+
+  # ArgoCD Application read permissions: for enhanced deletion detection
+  {{- if .Values.argocd.enabled }}
+  - apiGroups:
+      - argoproj.io
+    resources:
+      - applications
+    verbs:
+      - get
+      - list
+  {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
