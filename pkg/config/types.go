@@ -42,11 +42,6 @@ type Config struct {
 	// DryRun mode calculates diffs but doesn't post to GitHub
 	DryRun bool `yaml:"-"` // From CLI flag, not config file
 
-	// OutputFormat controls how diffs are rendered.
-	// Supported values: "github" (GitHub-flavored markdown, default),
-	// "json" (structured JSON for programmatic consumers)
-	OutputFormat string `yaml:"-"` // From CLI flag, not config file
-
 	// LabelKey is the label key for label-based detection
 	// Default: "millstone.tech/pr-number"
 	LabelKey string `yaml:"-"` // From CLI flag, not config file
@@ -66,7 +61,6 @@ func DefaultConfig() *Config {
 		NamePattern:       "pr-{number}-*",
 		LabelKey:          "millstone.tech/pr-number",
 		AnnotationKey:     "millstone.tech/preview-pr",
-		OutputFormat:      "github",
 		Diff: DiffConfig{
 			StripDefaults: true,
 			StripRules:    []StripRule{},
