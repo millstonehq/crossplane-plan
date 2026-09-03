@@ -223,6 +223,38 @@ Set `--output-format=json` to render the same diff as structured JSON instead, f
 
 In `--dry-run` mode the rendered output (in either format) is written to stdout, separate from the structured logs on stderr, so it can be piped or redirected.
 
+### One-shot mode
+
+By default crossplane-plan runs as an operator: it acquires a leader-election
+lease and blocks on watch loops until it is shut down. That is right for an
+in-cluster deployment and unusable from a pipeline, which needs one document
+and an exit code.
+
+`--once --pr=<number>` processes a single PR and exits:
+
+```bash
+crossplane-plan \
+  --once --pr=123 \
+  --github-repo=owner/repo \
+  --kubeconfig=$KUBECONFIG \
+  --output-format=json \
+  --dry-run > plan.json
+```
+
+It runs the same `ProcessPR` path the watcher reaches after debouncing, so the
+output is what the operator would have produced for that PR. Leader election is
+skipped deliberately: there is no long-lived lease to contend for, and blocking
+on one held by the in-cluster deployment would make a CI job hang rather than
+fail.
+
+`--once` and `--pr` are validated together. `--once` without `--pr` has no PR to
+process; `--pr` without `--once` would otherwise be silently ignored and start a
+long-running watcher, so a job expecting a single pass hangs until its timeout.
+Both are rejected with a non-zero exit.
+
+Drop `--dry-run` to post the comment as usual; the process still exits after the
+one PR.
+
 ## Development
 
 ### Prerequisites
