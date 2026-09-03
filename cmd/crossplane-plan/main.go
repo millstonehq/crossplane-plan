@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/crossplane/crossplane-runtime/v2/pkg/logging"
 	"github.com/millstonehq/crossplane-plan/pkg/argocd"
 	"github.com/millstonehq/crossplane-plan/pkg/config"
 	"github.com/millstonehq/crossplane-plan/pkg/detector"
@@ -19,29 +20,30 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	"github.com/crossplane/crossplane-runtime/v2/pkg/logging"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
 var (
-	kubeconfig              string
-	detectionStrategy       string
-	namePattern             string
-	githubRepo              string
-	githubToken             string
-	githubCredentials       string
-	githubAppID             string
-	githubInstallID         string
-	githubAppKeyPath        string
-	dryRun                  bool
-	reconciliationInterval  int
-	configPath              string
-	noStripDefaults         bool
-	argocdEnabled           bool
-	argocdNamespace         string
-	argocdPRPrefix          string
-	argocdPRSuffix          string
-	outputFormat            string
+	kubeconfig             string
+	detectionStrategy      string
+	namePattern            string
+	githubRepo             string
+	githubToken            string
+	githubCredentials      string
+	githubAppID            string
+	githubInstallID        string
+	githubAppKeyPath       string
+	dryRun                 bool
+	reconciliationInterval int
+	configPath             string
+	noStripDefaults        bool
+	argocdEnabled          bool
+	argocdNamespace        string
+	argocdPRPrefix         string
+	argocdPRSuffix         string
+	once                   bool
+	prNumber               int
+	outputFormat           string
 )
 
 func init() {
@@ -63,6 +65,8 @@ func init() {
 	flag.StringVar(&argocdPRPrefix, "argocd-pr-prefix", "pr-", "ArgoCD PR app name prefix (e.g., 'pr-' for 'pr-123-myapp')")
 	flag.StringVar(&argocdPRSuffix, "argocd-pr-suffix", "", "ArgoCD PR app name suffix (optional)")
 	flag.StringVar(&outputFormat, "output-format", "github", "Diff output format: github (GitHub-flavored markdown) or json (structured JSON for programmatic consumers)")
+	flag.BoolVar(&once, "once", false, "Process a single PR and exit instead of running as a watcher (requires --pr)")
+	flag.IntVar(&prNumber, "pr", 0, "PR number to process; only meaningful with --once")
 }
 
 func main() {
@@ -84,6 +88,11 @@ func main() {
 	// Validate required flags
 	if githubRepo == "" {
 		logrLogger.Error(fmt.Errorf("github-repo is required"), "missing required flag")
+		os.Exit(1)
+	}
+
+	if err := validateOnceFlags(once, prNumber); err != nil {
+		logrLogger.Error(err, "invalid flags")
 		os.Exit(1)
 	}
 
@@ -229,6 +238,26 @@ func main() {
 		cancel()
 	}()
 
+	// One-shot: process a single PR and exit.
+	//
+	// This is what makes crossplane-plan usable as a CI step rather than only
+	// as an in-cluster operator. Start() runs leader election and blocks on
+	// watch loops forever, which a pipeline cannot consume; ProcessPR is the
+	// same code path the watcher reaches after debouncing, so a one-shot run
+	// produces the output the operator would have produced for that PR.
+	//
+	// Deliberately skips leader election: there is no long-lived lease to
+	// contend for, and a CI job blocking on a lease held by the in-cluster
+	// deployment would hang rather than fail.
+	if once {
+		logger.Info("One-shot mode", "prNumber", prNumber)
+		if err := xrWatcher.ProcessPR(ctx, prNumber); err != nil {
+			logrLogger.Error(err, "failed to process PR", "prNumber", prNumber)
+			os.Exit(1)
+		}
+		return
+	}
+
 	// Start watching
 	if err := xrWatcher.Start(ctx); err != nil {
 		logrLogger.Error(err, "watcher failed")
@@ -243,6 +272,24 @@ func buildKubeConfig() (*rest.Config, error) {
 		return clientcmd.BuildConfigFromFlags("", kubeconfig)
 	}
 	return rest.InClusterConfig()
+}
+
+// validateOnceFlags rejects a half-specified one-shot run.
+//
+// Both directions matter. --once without --pr has no PR to process and would
+// otherwise fall through to a no-op exit that looks like success. --pr without
+// --once is the dangerous one: the flag is silently ignored and the process
+// starts a long-running watcher, so a CI job that expected a single pass and
+// an exit hangs until its timeout.
+func validateOnceFlags(once bool, prNumber int) error {
+	switch {
+	case once && prNumber <= 0:
+		return fmt.Errorf("--once requires --pr=<number>")
+	case !once && prNumber > 0:
+		return fmt.Errorf("--pr is only meaningful with --once " +
+			"(the watcher discovers PRs itself; --pr selects one for a single pass)")
+	}
+	return nil
 }
 
 func createDetector(cfg *config.Config) (detector.Detector, error) {
