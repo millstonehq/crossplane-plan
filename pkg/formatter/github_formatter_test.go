@@ -79,7 +79,7 @@ func TestGitHubFormatter_FormatDiff_WithNamespace(t *testing.T) {
 	xr := &unstructured.Unstructured{}
 	xr.SetKind("XGitHubRepository")
 	xr.SetName("mill")
-	xr.SetNamespace("millstone-prod")
+	xr.SetNamespace("example-namespace")
 
 	result := &differ.DiffResult{
 		XR:         xr,
@@ -90,7 +90,7 @@ func TestGitHubFormatter_FormatDiff_WithNamespace(t *testing.T) {
 
 	output := formatter.FormatDiff(xr, result)
 
-	if !strings.Contains(output, "**Namespace:** `millstone-prod`") {
+	if !strings.Contains(output, "**Namespace:** `example-namespace`") {
 		t.Error("Missing namespace in output")
 	}
 }

@@ -17,19 +17,70 @@ inputs:
 runs:
   using: composite
   steps:
+    # GUARDED ON runner.environment, BECAUSE THIS ACTION RUNS IN TWO PLACES.
+    #
+    # Both of these need a LOCAL docker daemon. In mill they run on a self-hosted ARC runner that
+    # deliberately has none -- arc-runner-set/values.yaml refuses containerMode: dind because "it
+    # would grant privileged execution to anything that can open a PR" -- so setup-buildx fails in
+    # under a second with "failed to connect to the docker API at unix:///var/run/docker.sock",
+    # and every later step is SKIPPED. The job then reports a docker error for a build that never
+    # ran. That is what happened to CI - crossplane-plan when this file arrived here.
+    #
+    # They are also pointless against a remote builder even where docker exists: earth talks to a
+    # buildkitd on another machine, which has its own platform support, and QEMU registered on the
+    # runner does nothing for it.
+    #
+    # A GUARD, NOT A DELETION. copybara exports this file to the public crossplane-plan repo,
+    # where CI runs on GitHub-hosted runners that have no shared buildkitd and genuinely need
+    # local buildx. runner.environment is 'github-hosted' or 'self-hosted' and is supplied by the
+    # runner itself, so it needs nothing declared anywhere and both paths keep working.
+    #
+    # NOT guarded on env.EARTH_BUILDKIT_HOST, and the difference is not cosmetic: the `env`
+    # context in an `if:` contains only variables declared in a workflow/job/step `env:` block.
+    # EARTH_BUILDKIT_HOST is injected into the runner POD, so a `run:` shell sees it and an `if:`
+    # does NOT -- the guard would be true everywhere and catch nothing.
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
+      if: runner.environment == 'github-hosted'
 
     - name: Set up QEMU for multi-platform builds
       uses: docker/setup-qemu-action@v3
+      if: runner.environment == 'github-hosted'
       with:
         platforms: linux/amd64,linux/arm64
 
     - name: Download Earthly
       shell: bash
       run: |
-        wget https://github.com/earthly/earthly/releases/latest/download/earthly-linux-amd64 -O /usr/local/bin/earthly
-        chmod +x /usr/local/bin/earthly
+        # PINNED, ARCH-DETECTED, AND INSTALLED WHERE THERE IS NO sudo. The line this replaces was
+        # `wget .../releases/latest/download/earthly-linux-amd64 -O /usr/local/bin/earthly`, which
+        # carried four separate faults and failed on the first one:
+        #
+        #   wget            is not on the ARC runner image -> "wget: command not found", exit 127.
+        #   releases/latest is a build that changes under you, which is the drift the version pin
+        #                   in every other workflow here exists to refuse.
+        #   -amd64          is an exec-format error on the arm64 runner pool these jobs run on.
+        #   /usr/local/bin  is not writable: the ARC runner image has no sudo.
+        #
+        # The version matches earthbuild/buildkitd on the shared builders -- mismatched BuildKit
+        # versions produce different cache keys, so client and daemon move together. Installed as
+        # `earth` with an `earthly` symlink so existing call sites resolve without a rename.
+        EARTH_VERSION=v0.8.18
+        case "$(uname -m)" in
+          x86_64)        EARTH_ARCH=amd64 ;;
+          aarch64|arm64) EARTH_ARCH=arm64 ;;
+          *) echo "::error::unsupported machine $(uname -m)"; exit 1 ;;
+        esac
+        mkdir -p "$HOME/.local/bin"
+        curl -fsSL "https://github.com/earthbuild/earthbuild/releases/download/${EARTH_VERSION}/earth-linux-${EARTH_ARCH}" \
+          -o "$HOME/.local/bin/earth"
+        chmod +x "$HOME/.local/bin/earth"
+        ln -sf "$HOME/.local/bin/earth" "$HOME/.local/bin/earthly"
+        export PATH="$HOME/.local/bin:$PATH"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        # TLS off only when there is a REMOTE buildkitd to reach; the variable is set on every
+        # runner pod, so a GitHub-hosted run with its own local buildkitd is left alone.
+        if [ -n "${EARTH_BUILDKIT_HOST:-}" ]; then earthly config global.tls_enabled false; fi
         earthly --version
 
     - name: Build with Earthly

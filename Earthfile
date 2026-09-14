@@ -13,7 +13,19 @@ PROJECT millstonehq/crossplane-plan
 # deps downloads and caches Go dependencies (always runs on amd64 for fast builds)
 deps:
     ARG SRC_PATH=.
-    FROM --platform=linux/amd64 ghcr.io/millstonehq/go:1.25
+    # NATIVE, NOT amd64, AND THE DIFFERENCE IS WHERE THIS BUILDS.
+    #
+    # This was `--platform=linux/amd64`, which is native on the public repo's ubuntu-latest CI and
+    # EMULATED in mill, whose runners address an arm64 buildkitd. Neither self-hosted builder can
+    # emulate -- binfmt_misc is absent from the Talos kernel -- so `go mod download` died with
+    # ".buildkit_qemu_emulator: /usr/bin/earth_debugger: Invalid ELF image for this architecture".
+    #
+    # deps/test/lint are BUILD-TIME stages; nothing about them needs a fixed architecture. The
+    # artifacts that do keep theirs: +image pins $TARGETPLATFORM and +publish builds both arches.
+    # Same shape as providers/provider-upjet-cloudflare, which pins $NATIVEPLATFORM and
+    # cross-compiles.
+    ARG NATIVEPLATFORM
+    FROM --platform=$NATIVEPLATFORM ghcr.io/millstonehq/go:1.25
     WORKDIR /app
 
     COPY ${SRC_PATH}/go.mod ${SRC_PATH}/go.sum ./
@@ -180,11 +192,20 @@ all:
 
     COPY --dir ${SRC_PATH}/cmd ${SRC_PATH}/pkg ./
 
-    # Run test
-    RUN CGO_ENABLED=0 go test -v -cover ./...
+    # TESTS RUN NATIVELY; ONLY THE BUILD CROSS-COMPILES. `ARG GOARCH=amd64` above becomes an
+    # ENVIRONMENT VARIABLE for every RUN in this target, so `go test` inherited it even though
+    # this line never mentions it -- Go then cross-compiled the test binaries and the runner could
+    # not execute them:
+    #
+    #   fork/exec /tmp/go-build.../workqueue.test: exec format error
+    #
+    # A test must EXECUTE, so it has to be built for the host. A binary only has to be produced,
+    # so it may cross-compile. `env -u` states that difference where it applies rather than
+    # changing the target's GOARCH default, which the build below deliberately uses.
+    RUN CGO_ENABLED=0 env -u GOARCH -u GOOS go test -v -cover ./...
 
     # Run lint
-    RUN go vet ./...
+    RUN env -u GOARCH -u GOOS go vet ./...
     RUN go fmt ./...
 
     # Run build (cross-compile for target arch)

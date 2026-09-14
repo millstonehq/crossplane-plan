@@ -58,7 +58,7 @@ func TestJSONFormatter_FormatDiff_WithNamespace(t *testing.T) {
 	xr := &unstructured.Unstructured{}
 	xr.SetKind("XGitHubRepository")
 	xr.SetName("mill")
-	xr.SetNamespace("millstone-prod")
+	xr.SetNamespace("example-namespace")
 
 	result := &differ.DiffResult{XR: xr, Summary: "No changes"}
 
@@ -67,8 +67,8 @@ func TestJSONFormatter_FormatDiff_WithNamespace(t *testing.T) {
 		t.Fatalf("output is not valid JSON: %v", err)
 	}
 
-	if doc.Namespace != "millstone-prod" {
-		t.Errorf("Namespace = %q, want millstone-prod", doc.Namespace)
+	if doc.Namespace != "example-namespace" {
+		t.Errorf("Namespace = %q, want example-namespace", doc.Namespace)
 	}
 }
 
