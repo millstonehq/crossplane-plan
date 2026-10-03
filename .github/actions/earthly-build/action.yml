@@ -80,7 +80,8 @@ runs:
         echo "$HOME/.local/bin" >> "$GITHUB_PATH"
         # TLS off only when there is a REMOTE buildkitd to reach; the variable is set on every
         # runner pod, so a GitHub-hosted run with its own local buildkitd is left alone.
-        if [ -n "${EARTH_BUILDKIT_HOST:-}" ]; then earthly config global.tls_enabled false; fi
+        # A runner that sets EARTH_CONFIG configures earth itself.
+        if [ -n "${EARTH_BUILDKIT_HOST:-}" ] && [ -z "${EARTH_CONFIG:-}" ]; then earthly config global.tls_enabled false; fi
         earthly --version
 
     - name: Build with Earthly
