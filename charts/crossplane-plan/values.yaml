@@ -32,6 +32,9 @@ kubedock:
     readOnlyRootFilesystem: true
 
 # Deployment configuration
+nodeSelector: {}
+tolerations: []
+
 # HA-ready: leader election ensures only one replica processes events
 replicas: 3
 
