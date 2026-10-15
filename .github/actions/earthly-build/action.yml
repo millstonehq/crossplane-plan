@@ -66,13 +66,18 @@ runs:
         # versions produce different cache keys, so client and daemon move together. Installed as
         # `earth` with an `earthly` symlink so existing call sites resolve without a rename.
         EARTH_VERSION=v0.8.18
+        EARTH_RELEASE_REPO=earthbuild/earthbuild
+        if [ "${{ runner.environment }}" = "self-hosted" ]; then
+          EARTH_VERSION=v0.8.18-pr1004-07aa5586
+          EARTH_RELEASE_REPO=c-p-b/earthbuild
+        fi
         case "$(uname -m)" in
           x86_64)        EARTH_ARCH=amd64 ;;
           aarch64|arm64) EARTH_ARCH=arm64 ;;
           *) echo "::error::unsupported machine $(uname -m)"; exit 1 ;;
         esac
         mkdir -p "$HOME/.local/bin"
-        curl -fsSL "https://github.com/earthbuild/earthbuild/releases/download/${EARTH_VERSION}/earth-linux-${EARTH_ARCH}" \
+        curl -fsSL "https://github.com/${EARTH_RELEASE_REPO}/releases/download/${EARTH_VERSION}/earth-linux-${EARTH_ARCH}" \
           -o "$HOME/.local/bin/earth"
         chmod +x "$HOME/.local/bin/earth"
         ln -sf "$HOME/.local/bin/earth" "$HOME/.local/bin/earthly"
