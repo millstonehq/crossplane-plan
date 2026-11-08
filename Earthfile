@@ -24,8 +24,11 @@ deps:
     # artifacts that do keep theirs: +image pins $TARGETPLATFORM and +publish builds both arches.
     # Same shape as providers/provider-upjet-cloudflare, which pins $NATIVEPLATFORM and
     # cross-compiles.
+    #
+    # golang:1.26, not ghcr.io/millstonehq/go:1.25: go.mod requires Go 1.26 (golang.org/x/net
+    # v0.60.0 does), and lib/base-images publishes only a 1.25 builder.
     ARG NATIVEPLATFORM
-    FROM --platform=$NATIVEPLATFORM ghcr.io/millstonehq/go:1.25
+    FROM --platform=$NATIVEPLATFORM golang:1.26.10-alpine@sha256:87c65a688975c0b1d4585d204874c45ca78354670e3a5f11368c5a492303d696
     WORKDIR /app
 
     COPY ${SRC_PATH}/go.mod ${SRC_PATH}/go.sum ./
